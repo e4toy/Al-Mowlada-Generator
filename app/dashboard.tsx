@@ -1,0 +1,933 @@
+import React, { useState, useMemo, useCallback } from 'react';
+import {
+  View, Text, Pressable, StyleSheet, FlatList, Modal, TextInput,
+  Platform, Linking, ScrollView, Alert, I18nManager,
+} from 'react-native';
+import { router } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Feather, MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
+import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
+import { useApp } from '@/contexts/AppContext';
+import Colors from '@/constants/colors';
+import {
+  Subscriber, Payment, getMonthKey, getMonthLabel,
+  getTierColor, getTierBgColor, getTierLabel, sanitizePhone,
+} from '@/lib/storage';
+
+type ModalType = 'none' | 'addSubscriber' | 'setPricing' | 'partialPayment' | 'addExpense' | 'payments';
+
+export default function DashboardScreen() {
+  const insets = useSafeAreaInsets();
+  const app = useApp();
+  const webTopInset = Platform.OS === 'web' ? 67 : 0;
+  const webBottomInset = Platform.OS === 'web' ? 34 : 0;
+  const topPad = (insets.top || webTopInset);
+  const bottomPad = (insets.bottom || webBottomInset);
+
+  const now = new Date();
+  const [selectedYear, setSelectedYear] = useState(now.getFullYear());
+  const [selectedMonthIdx, setSelectedMonthIdx] = useState(now.getMonth());
+  const selectedMonth = getMonthKey(selectedYear, selectedMonthIdx);
+
+  const [modal, setModal] = useState<ModalType>('none');
+  const [activeSubscriber, setActiveSubscriber] = useState<Subscriber | null>(null);
+
+  const [newSubName, setNewSubName] = useState('');
+  const [newSubPhone, setNewSubPhone] = useState('');
+  const [newSubAmperes, setNewSubAmperes] = useState('');
+  const [newSubTier, setNewSubTier] = useState<'gold' | 'silver' | 'bronze'>('gold');
+
+  const [priceGold, setPriceGold] = useState('');
+  const [priceSilver, setPriceSilver] = useState('');
+  const [priceBronze, setPriceBronze] = useState('');
+
+  const [partialAmount, setPartialAmount] = useState('');
+
+  const [expenseDesc, setExpenseDesc] = useState('');
+  const [expenseAmount, setExpenseAmount] = useState('');
+
+  const months = useMemo(() => {
+    const list: { key: string; label: string; year: number; month: number }[] = [];
+    for (let m = 0; m < 12; m++) {
+      list.push({
+        key: getMonthKey(selectedYear, m),
+        label: getMonthLabel(getMonthKey(selectedYear, m)),
+        year: selectedYear,
+        month: m,
+      });
+    }
+    return list;
+  }, [selectedYear]);
+
+  const monthSubscribers = useMemo(() => {
+    return app.subscribers.filter(s => s.createdMonth <= selectedMonth);
+  }, [app.subscribers, selectedMonth]);
+
+  const monthPricing = app.pricing[selectedMonth];
+
+  const stats = useMemo(() => {
+    let totalAmperes = 0;
+    let totalDue = 0;
+    let totalPaid = 0;
+    monthSubscribers.forEach(sub => {
+      totalAmperes += sub.amperes;
+      totalDue += app.getSubscriberDue(sub, selectedMonth);
+      totalPaid += app.getSubscriberPaid(sub.id, selectedMonth);
+    });
+    const totalExpenses = app.expenses
+      .filter(e => e.month === selectedMonth)
+      .reduce((sum, e) => sum + e.amount, 0);
+    return {
+      totalAmperes,
+      totalCollected: totalPaid,
+      totalOutstanding: totalDue - totalPaid,
+      totalExpenses,
+    };
+  }, [monthSubscribers, selectedMonth, app]);
+
+  function openPricingModal() {
+    const p = app.pricing[selectedMonth];
+    setPriceGold(p?.gold?.toString() || '');
+    setPriceSilver(p?.silver?.toString() || '');
+    setPriceBronze(p?.bronze?.toString() || '');
+    setModal('setPricing');
+  }
+
+  async function savePricing() {
+    const g = parseFloat(priceGold) || 0;
+    const s = parseFloat(priceSilver) || 0;
+    const b = parseFloat(priceBronze) || 0;
+    await app.setPricing(selectedMonth, { gold: g, silver: s, bronze: b });
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    setModal('none');
+  }
+
+  function openAddSubscriber() {
+    setNewSubName('');
+    setNewSubPhone('');
+    setNewSubAmperes('');
+    setNewSubTier('gold');
+    setModal('addSubscriber');
+  }
+
+  async function saveSubscriber() {
+    if (!newSubName.trim() || !newSubAmperes.trim()) return;
+    await app.addSubscriber({
+      name: newSubName.trim(),
+      phone: newSubPhone.trim(),
+      amperes: parseFloat(newSubAmperes) || 0,
+      tier: newSubTier,
+      createdMonth: selectedMonth,
+    });
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    setModal('none');
+  }
+
+  async function handleFullPayment(sub: Subscriber) {
+    const due = app.getSubscriberDue(sub, selectedMonth);
+    const paid = app.getSubscriberPaid(sub.id, selectedMonth);
+    const remaining = due - paid;
+    if (remaining <= 0) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    await app.recordPayment(sub.id, selectedMonth, remaining, 'full');
+    const msg = `تم استلام دفعة كاملة بمبلغ ${remaining.toLocaleString()} من ${sub.name} بتاريخ ${new Date().toLocaleDateString('ar-IQ')}`;
+    sendWhatsApp(sub.phone, msg);
+  }
+
+  function openPartialPayment(sub: Subscriber) {
+    setActiveSubscriber(sub);
+    setPartialAmount('');
+    setModal('partialPayment');
+  }
+
+  async function savePartialPayment() {
+    if (!activeSubscriber || !partialAmount.trim()) return;
+    const amount = parseFloat(partialAmount) || 0;
+    if (amount <= 0) return;
+    await app.recordPayment(activeSubscriber.id, selectedMonth, amount, 'partial');
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    const due = app.getSubscriberDue(activeSubscriber, selectedMonth);
+    const paid = app.getSubscriberPaid(activeSubscriber.id, selectedMonth) + amount;
+    const remaining = due - paid;
+    const msg = `تم استلام دفعة جزئية بمبلغ ${amount.toLocaleString()} من ${activeSubscriber.name}. المتبقي: ${remaining.toLocaleString()} بتاريخ ${new Date().toLocaleDateString('ar-IQ')}`;
+    sendWhatsApp(activeSubscriber.phone, msg);
+    setModal('none');
+  }
+
+  function openPaymentHistory(sub: Subscriber) {
+    setActiveSubscriber(sub);
+    setModal('payments');
+  }
+
+  async function handleCancelPayment(paymentId: string) {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    await app.cancelPayment(paymentId);
+  }
+
+  function sendWhatsApp(phone: string, message: string) {
+    if (!phone) return;
+    const cleanPhone = sanitizePhone(phone);
+    const url = `whatsapp://send?phone=${cleanPhone}&text=${encodeURIComponent(message)}`;
+    Linking.openURL(url).catch(() => {});
+  }
+
+  function openExpenseModal() {
+    setExpenseDesc('');
+    setExpenseAmount('');
+    setModal('addExpense');
+  }
+
+  async function saveExpense() {
+    if (!expenseDesc.trim() || !expenseAmount.trim()) return;
+    await app.addExpense(selectedMonth, expenseDesc.trim(), parseFloat(expenseAmount) || 0);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    setModal('none');
+  }
+
+  function handleLogout() {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    app.logout();
+    router.replace('/');
+  }
+
+  const subscriberPayments = activeSubscriber
+    ? app.getSubscriberPayments(activeSubscriber.id, selectedMonth)
+    : [];
+
+  const renderSubscriberItem = useCallback(({ item }: { item: Subscriber }) => {
+    const due = app.getSubscriberDue(item, selectedMonth);
+    const paid = app.getSubscriberPaid(item.id, selectedMonth);
+    const remaining = due - paid;
+    const isPaidFull = remaining <= 0 && due > 0;
+    return (
+      <Animated.View entering={FadeInDown.duration(300)} style={styles.subCard}>
+        <View style={styles.subHeader}>
+          <View style={styles.subInfo}>
+            <Text style={styles.subName}>{item.name}</Text>
+            <View style={[styles.tierBadge, { backgroundColor: getTierBgColor(item.tier) }]}>
+              <Text style={[styles.tierText, { color: getTierColor(item.tier) }]}>{getTierLabel(item.tier)}</Text>
+            </View>
+          </View>
+          <View style={styles.amperesBox}>
+            <MaterialCommunityIcons name="flash" size={14} color={Colors.primary} />
+            <Text style={styles.amperesText}>{item.amperes}A</Text>
+          </View>
+        </View>
+
+        <View style={styles.subFinancials}>
+          <View style={styles.finItem}>
+            <Text style={styles.finLabel}>المستحق</Text>
+            <Text style={styles.finValue}>{due.toLocaleString()}</Text>
+          </View>
+          <View style={styles.finDivider} />
+          <View style={styles.finItem}>
+            <Text style={styles.finLabel}>المدفوع</Text>
+            <Text style={[styles.finValue, { color: Colors.success }]}>{paid.toLocaleString()}</Text>
+          </View>
+          <View style={styles.finDivider} />
+          <View style={styles.finItem}>
+            <Text style={styles.finLabel}>المتبقي</Text>
+            <Text style={[styles.finValue, { color: remaining > 0 ? Colors.error : Colors.success }]}>
+              {remaining.toLocaleString()}
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.subActions}>
+          {!isPaidFull ? (
+            <>
+              <Pressable
+                style={({ pressed }) => [styles.actionBtn, styles.fullPayBtn, pressed && { opacity: 0.7 }]}
+                onPress={() => handleFullPayment(item)}
+              >
+                <Feather name="check-circle" size={15} color="#fff" />
+                <Text style={styles.actionBtnText}>دفع كامل</Text>
+              </Pressable>
+              <Pressable
+                style={({ pressed }) => [styles.actionBtn, styles.partialPayBtn, pressed && { opacity: 0.7 }]}
+                onPress={() => openPartialPayment(item)}
+              >
+                <Feather name="edit-3" size={15} color={Colors.primary} />
+                <Text style={[styles.actionBtnText, { color: Colors.primary }]}>دفع جزئي</Text>
+              </Pressable>
+            </>
+          ) : (
+            <View style={styles.paidBadge}>
+              <Feather name="check" size={14} color={Colors.success} />
+              <Text style={styles.paidText}>مدفوع بالكامل</Text>
+            </View>
+          )}
+          <Pressable
+            style={({ pressed }) => [styles.actionBtn, styles.historyBtn, pressed && { opacity: 0.7 }]}
+            onPress={() => openPaymentHistory(item)}
+          >
+            <Feather name="clock" size={15} color={Colors.textSecondary} />
+          </Pressable>
+        </View>
+      </Animated.View>
+    );
+  }, [selectedMonth, app]);
+
+  return (
+    <View style={[styles.container, { paddingTop: topPad }]}>
+      <View style={styles.topBar}>
+        <View style={styles.topBarLeft}>
+          <Text style={styles.ownerName}>{app.currentOwner?.name || ''}</Text>
+          <Text style={styles.ownerLabel}>لوحة التحكم</Text>
+        </View>
+        <View style={styles.topBarRight}>
+          <Pressable onPress={openExpenseModal} hitSlop={6} style={styles.topIconBtn}>
+            <Feather name="dollar-sign" size={20} color={Colors.text} />
+          </Pressable>
+          <Pressable onPress={openPricingModal} hitSlop={6} style={styles.topIconBtn}>
+            <Feather name="settings" size={20} color={Colors.text} />
+          </Pressable>
+          <Pressable onPress={handleLogout} hitSlop={6} style={styles.topIconBtn}>
+            <Feather name="log-out" size={20} color={Colors.error} />
+          </Pressable>
+        </View>
+      </View>
+
+      <View style={styles.yearRow}>
+        <Pressable onPress={() => setSelectedYear(y => y - 1)} hitSlop={8}>
+          <Feather name="chevron-right" size={22} color={Colors.text} />
+        </Pressable>
+        <Text style={styles.yearText}>{selectedYear}</Text>
+        <Pressable onPress={() => setSelectedYear(y => y + 1)} hitSlop={8}>
+          <Feather name="chevron-left" size={22} color={Colors.text} />
+        </Pressable>
+      </View>
+
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.monthScroll}
+        style={styles.monthScrollContainer}
+      >
+        {months.map((m) => {
+          const isActive = m.month === selectedMonthIdx;
+          return (
+            <Pressable
+              key={m.key}
+              onPress={() => setSelectedMonthIdx(m.month)}
+              style={[styles.monthChip, isActive && styles.monthChipActive]}
+            >
+              <Text style={[styles.monthChipText, isActive && styles.monthChipTextActive]}>
+                {m.label.split(' ')[0]}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+
+      <ScrollView style={styles.statsRow} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.statsContent}>
+        <StatCard icon="flash" label="إجمالي الأمبيرات" value={stats.totalAmperes.toString()} color={Colors.primary} />
+        <StatCard icon="arrow-down-circle" label="إجمالي المحصّل" value={stats.totalCollected.toLocaleString()} color={Colors.success} />
+        <StatCard icon="arrow-up-circle" label="المتبقي" value={stats.totalOutstanding.toLocaleString()} color={Colors.error} />
+        <StatCard icon="trending-down" label="المصاريف" value={stats.totalExpenses.toLocaleString()} color={Colors.warning} />
+      </ScrollView>
+
+      {!monthPricing ? (
+        <View style={styles.noPricingBanner}>
+          <Feather name="alert-triangle" size={16} color={Colors.warning} />
+          <Text style={styles.noPricingText}>لم يتم تعيين أسعار هذا الشهر</Text>
+          <Pressable onPress={openPricingModal}>
+            <Text style={styles.noPricingLink}>تعيين الآن</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      <FlatList
+        data={monthSubscribers}
+        keyExtractor={(item) => item.id}
+        renderItem={renderSubscriberItem}
+        contentContainerStyle={[styles.listContent, { paddingBottom: bottomPad + 80 }]}
+        showsVerticalScrollIndicator={false}
+        scrollEnabled={!!monthSubscribers.length}
+        ListEmptyComponent={
+          <View style={styles.emptyState}>
+            <Feather name="users" size={40} color={Colors.textMuted} />
+            <Text style={styles.emptyText}>لا يوجد مشتركون لهذا الشهر</Text>
+            <Text style={styles.emptySubText}>أضف مشتركين جدد لبدء الإدارة</Text>
+          </View>
+        }
+      />
+
+      <Pressable
+        style={({ pressed }) => [styles.fab, pressed && { transform: [{ scale: 0.93 }] }]}
+        onPress={openAddSubscriber}
+      >
+        <Feather name="plus" size={24} color="#fff" />
+      </Pressable>
+
+      <Modal visible={modal === 'addSubscriber'} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>إضافة مشترك</Text>
+              <Pressable onPress={() => setModal('none')}><Feather name="x" size={22} color={Colors.text} /></Pressable>
+            </View>
+            <ScrollView contentContainerStyle={styles.modalBody}>
+              <Text style={styles.modalLabel}>الاسم</Text>
+              <TextInput style={styles.modalInput} value={newSubName} onChangeText={setNewSubName} placeholder="اسم المشترك" placeholderTextColor={Colors.textMuted} textAlign={I18nManager.isRTL ? 'right' : 'left'} />
+              <Text style={styles.modalLabel}>رقم الهاتف</Text>
+              <TextInput style={styles.modalInput} value={newSubPhone} onChangeText={setNewSubPhone} placeholder="07XXXXXXXXX" placeholderTextColor={Colors.textMuted} keyboardType="phone-pad" textAlign={I18nManager.isRTL ? 'right' : 'left'} />
+              <Text style={styles.modalLabel}>عدد الأمبيرات</Text>
+              <TextInput style={styles.modalInput} value={newSubAmperes} onChangeText={setNewSubAmperes} placeholder="مثال: 5" placeholderTextColor={Colors.textMuted} keyboardType="numeric" textAlign={I18nManager.isRTL ? 'right' : 'left'} />
+              <Text style={styles.modalLabel}>نوع الاشتراك</Text>
+              <View style={styles.tierPicker}>
+                {(['gold', 'silver', 'bronze'] as const).map((t) => (
+                  <Pressable
+                    key={t}
+                    style={[styles.tierOption, newSubTier === t && { backgroundColor: getTierBgColor(t), borderColor: getTierColor(t) }]}
+                    onPress={() => setNewSubTier(t)}
+                  >
+                    <Text style={[styles.tierOptionText, { color: getTierColor(t) }]}>{getTierLabel(t)}</Text>
+                  </Pressable>
+                ))}
+              </View>
+              <Pressable style={({ pressed }) => [styles.modalBtn, pressed && { opacity: 0.85 }]} onPress={saveSubscriber}>
+                <Text style={styles.modalBtnText}>إضافة</Text>
+              </Pressable>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={modal === 'setPricing'} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>أسعار {getMonthLabel(selectedMonth)}</Text>
+              <Pressable onPress={() => setModal('none')}><Feather name="x" size={22} color={Colors.text} /></Pressable>
+            </View>
+            <ScrollView contentContainerStyle={styles.modalBody}>
+              <View style={styles.pricingRow}>
+                <View style={[styles.pricingDot, { backgroundColor: Colors.gold }]} />
+                <Text style={styles.modalLabel}>سعر الأمبير الذهبي</Text>
+              </View>
+              <TextInput style={styles.modalInput} value={priceGold} onChangeText={setPriceGold} placeholder="0" placeholderTextColor={Colors.textMuted} keyboardType="numeric" textAlign={I18nManager.isRTL ? 'right' : 'left'} />
+
+              <View style={styles.pricingRow}>
+                <View style={[styles.pricingDot, { backgroundColor: Colors.silver }]} />
+                <Text style={styles.modalLabel}>سعر الأمبير الفضي</Text>
+              </View>
+              <TextInput style={styles.modalInput} value={priceSilver} onChangeText={setPriceSilver} placeholder="0" placeholderTextColor={Colors.textMuted} keyboardType="numeric" textAlign={I18nManager.isRTL ? 'right' : 'left'} />
+
+              <View style={styles.pricingRow}>
+                <View style={[styles.pricingDot, { backgroundColor: Colors.bronze }]} />
+                <Text style={styles.modalLabel}>سعر الأمبير البرونزي</Text>
+              </View>
+              <TextInput style={styles.modalInput} value={priceBronze} onChangeText={setPriceBronze} placeholder="0" placeholderTextColor={Colors.textMuted} keyboardType="numeric" textAlign={I18nManager.isRTL ? 'right' : 'left'} />
+
+              <Pressable style={({ pressed }) => [styles.modalBtn, pressed && { opacity: 0.85 }]} onPress={savePricing}>
+                <Text style={styles.modalBtnText}>حفظ الأسعار</Text>
+              </Pressable>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={modal === 'partialPayment'} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { maxHeight: 320 }]}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>دفع جزئي - {activeSubscriber?.name}</Text>
+              <Pressable onPress={() => setModal('none')}><Feather name="x" size={22} color={Colors.text} /></Pressable>
+            </View>
+            <View style={styles.modalBody}>
+              {activeSubscriber ? (
+                <>
+                  <Text style={styles.modalLabel}>
+                    المتبقي: {(app.getSubscriberDue(activeSubscriber, selectedMonth) - app.getSubscriberPaid(activeSubscriber.id, selectedMonth)).toLocaleString()}
+                  </Text>
+                  <TextInput style={styles.modalInput} value={partialAmount} onChangeText={setPartialAmount} placeholder="أدخل المبلغ" placeholderTextColor={Colors.textMuted} keyboardType="numeric" textAlign={I18nManager.isRTL ? 'right' : 'left'} />
+                  <Pressable style={({ pressed }) => [styles.modalBtn, pressed && { opacity: 0.85 }]} onPress={savePartialPayment}>
+                    <Text style={styles.modalBtnText}>تسجيل الدفع</Text>
+                  </Pressable>
+                </>
+              ) : null}
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={modal === 'addExpense'} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { maxHeight: 380 }]}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>إضافة مصروف</Text>
+              <Pressable onPress={() => setModal('none')}><Feather name="x" size={22} color={Colors.text} /></Pressable>
+            </View>
+            <View style={styles.modalBody}>
+              <Text style={styles.modalLabel}>الوصف</Text>
+              <TextInput style={styles.modalInput} value={expenseDesc} onChangeText={setExpenseDesc} placeholder="وصف المصروف" placeholderTextColor={Colors.textMuted} textAlign={I18nManager.isRTL ? 'right' : 'left'} />
+              <Text style={styles.modalLabel}>المبلغ</Text>
+              <TextInput style={styles.modalInput} value={expenseAmount} onChangeText={setExpenseAmount} placeholder="0" placeholderTextColor={Colors.textMuted} keyboardType="numeric" textAlign={I18nManager.isRTL ? 'right' : 'left'} />
+              <Pressable style={({ pressed }) => [styles.modalBtn, pressed && { opacity: 0.85 }]} onPress={saveExpense}>
+                <Text style={styles.modalBtnText}>إضافة المصروف</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={modal === 'payments'} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>سجل الدفعات - {activeSubscriber?.name}</Text>
+              <Pressable onPress={() => setModal('none')}><Feather name="x" size={22} color={Colors.text} /></Pressable>
+            </View>
+            <FlatList
+              data={subscriberPayments}
+              keyExtractor={(item) => item.id}
+              contentContainerStyle={{ padding: 16 }}
+              scrollEnabled={!!subscriberPayments.length}
+              ListEmptyComponent={
+                <View style={styles.emptyState}>
+                  <Feather name="inbox" size={32} color={Colors.textMuted} />
+                  <Text style={styles.emptyText}>لا توجد دفعات مسجلة</Text>
+                </View>
+              }
+              renderItem={({ item }) => (
+                <View style={styles.paymentItem}>
+                  <View style={styles.paymentInfo}>
+                    <Text style={styles.paymentAmount}>{item.amount.toLocaleString()}</Text>
+                    <Text style={styles.paymentDate}>
+                      {new Date(item.date).toLocaleDateString('ar-IQ')} - {item.type === 'full' ? 'كامل' : 'جزئي'}
+                    </Text>
+                  </View>
+                  <Pressable
+                    onPress={() => handleCancelPayment(item.id)}
+                    style={({ pressed }) => [styles.cancelPayBtn, pressed && { opacity: 0.6 }]}
+                  >
+                    <Feather name="rotate-ccw" size={16} color={Colors.error} />
+                  </Pressable>
+                </View>
+              )}
+            />
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
+}
+
+function StatCard({ icon, label, value, color }: { icon: string; label: string; value: string; color: string }) {
+  return (
+    <View style={statStyles.card}>
+      <View style={[statStyles.iconBg, { backgroundColor: color + '18' }]}>
+        <Feather name={icon as any} size={18} color={color} />
+      </View>
+      <Text style={statStyles.value}>{value}</Text>
+      <Text style={statStyles.label}>{label}</Text>
+    </View>
+  );
+}
+
+const statStyles = StyleSheet.create({
+  card: {
+    backgroundColor: Colors.surface,
+    borderRadius: 14,
+    padding: 14,
+    width: 140,
+    marginRight: 10,
+    gap: 6,
+  },
+  iconBg: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  value: {
+    fontSize: 20,
+    fontFamily: 'Cairo_700Bold',
+    color: Colors.text,
+  },
+  label: {
+    fontSize: 11,
+    fontFamily: 'Cairo_400Regular',
+    color: Colors.textSecondary,
+  },
+});
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: Colors.background,
+  },
+  topBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+  },
+  topBarLeft: {
+    flex: 1,
+  },
+  topBarRight: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  topIconBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: Colors.surface,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  ownerName: {
+    fontSize: 20,
+    fontFamily: 'Cairo_700Bold',
+    color: Colors.text,
+    textAlign: 'right',
+  },
+  ownerLabel: {
+    fontSize: 12,
+    fontFamily: 'Cairo_400Regular',
+    color: Colors.textSecondary,
+    textAlign: 'right',
+  },
+  yearRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 20,
+    paddingVertical: 6,
+  },
+  yearText: {
+    fontSize: 16,
+    fontFamily: 'Cairo_700Bold',
+    color: Colors.text,
+  },
+  monthScrollContainer: {
+    maxHeight: 44,
+    marginBottom: 8,
+  },
+  monthScroll: {
+    paddingHorizontal: 16,
+    gap: 6,
+  },
+  monthChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: Colors.surface,
+  },
+  monthChipActive: {
+    backgroundColor: Colors.primary,
+  },
+  monthChipText: {
+    fontSize: 13,
+    fontFamily: 'Cairo_600SemiBold',
+    color: Colors.textSecondary,
+  },
+  monthChipTextActive: {
+    color: '#fff',
+  },
+  statsRow: {
+    maxHeight: 130,
+    marginBottom: 4,
+  },
+  statsContent: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  noPricingBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginHorizontal: 16,
+    marginBottom: 8,
+    backgroundColor: Colors.warningLight,
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+  },
+  noPricingText: {
+    flex: 1,
+    fontSize: 13,
+    fontFamily: 'Cairo_400Regular',
+    color: Colors.warning,
+    textAlign: 'right',
+  },
+  noPricingLink: {
+    fontSize: 13,
+    fontFamily: 'Cairo_600SemiBold',
+    color: Colors.primary,
+  },
+  listContent: {
+    paddingHorizontal: 16,
+    paddingTop: 4,
+  },
+  subCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 10,
+  },
+  subHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  subInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+  },
+  subName: {
+    fontSize: 16,
+    fontFamily: 'Cairo_700Bold',
+    color: Colors.text,
+  },
+  tierBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  tierText: {
+    fontSize: 11,
+    fontFamily: 'Cairo_600SemiBold',
+  },
+  amperesBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: Colors.primaryFaded,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  amperesText: {
+    fontSize: 13,
+    fontFamily: 'Cairo_700Bold',
+    color: Colors.primary,
+  },
+  subFinancials: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    backgroundColor: Colors.background,
+    borderRadius: 10,
+    paddingVertical: 10,
+    marginBottom: 12,
+  },
+  finItem: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  finDivider: {
+    width: 1,
+    backgroundColor: Colors.border,
+  },
+  finLabel: {
+    fontSize: 11,
+    fontFamily: 'Cairo_400Regular',
+    color: Colors.textSecondary,
+    marginBottom: 2,
+  },
+  finValue: {
+    fontSize: 15,
+    fontFamily: 'Cairo_700Bold',
+    color: Colors.text,
+  },
+  subActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  actionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+  },
+  fullPayBtn: {
+    backgroundColor: Colors.success,
+  },
+  partialPayBtn: {
+    backgroundColor: Colors.primaryFaded,
+  },
+  historyBtn: {
+    backgroundColor: Colors.surfaceSecondary,
+    marginLeft: 'auto',
+  },
+  actionBtnText: {
+    fontSize: 12,
+    fontFamily: 'Cairo_600SemiBold',
+    color: '#fff',
+  },
+  paidBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: Colors.successLight,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+  },
+  paidText: {
+    fontSize: 12,
+    fontFamily: 'Cairo_600SemiBold',
+    color: Colors.success,
+  },
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: 40,
+    gap: 8,
+  },
+  emptyText: {
+    fontSize: 15,
+    fontFamily: 'Cairo_600SemiBold',
+    color: Colors.textMuted,
+  },
+  emptySubText: {
+    fontSize: 13,
+    fontFamily: 'Cairo_400Regular',
+    color: Colors.textMuted,
+  },
+  fab: {
+    position: 'absolute',
+    bottom: 100,
+    left: 20,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: Colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 6,
+    shadowColor: Colors.primaryDark,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: Colors.overlay,
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: Colors.surface,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '80%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.divider,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontFamily: 'Cairo_700Bold',
+    color: Colors.text,
+    flex: 1,
+    textAlign: 'right',
+  },
+  modalBody: {
+    padding: 20,
+    gap: 12,
+  },
+  modalLabel: {
+    fontSize: 14,
+    fontFamily: 'Cairo_600SemiBold',
+    color: Colors.text,
+    textAlign: 'right',
+  },
+  modalInput: {
+    backgroundColor: Colors.background,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    paddingHorizontal: 14,
+    height: 48,
+    fontSize: 15,
+    fontFamily: 'Cairo_400Regular',
+    color: Colors.text,
+  },
+  modalBtn: {
+    backgroundColor: Colors.primary,
+    borderRadius: 12,
+    height: 48,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  modalBtnText: {
+    fontSize: 15,
+    fontFamily: 'Cairo_700Bold',
+    color: '#fff',
+  },
+  tierPicker: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  tierOption: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    alignItems: 'center',
+  },
+  tierOptionText: {
+    fontSize: 13,
+    fontFamily: 'Cairo_600SemiBold',
+  },
+  pricingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  pricingDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  paymentItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: Colors.background,
+    borderRadius: 10,
+    padding: 14,
+    marginBottom: 8,
+  },
+  paymentInfo: {
+    flex: 1,
+  },
+  paymentAmount: {
+    fontSize: 16,
+    fontFamily: 'Cairo_700Bold',
+    color: Colors.text,
+    textAlign: 'right',
+  },
+  paymentDate: {
+    fontSize: 12,
+    fontFamily: 'Cairo_400Regular',
+    color: Colors.textSecondary,
+    textAlign: 'right',
+  },
+  cancelPayBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: Colors.errorLight,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+});

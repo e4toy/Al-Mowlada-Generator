@@ -1,0 +1,381 @@
+import React, { useState, useMemo, useCallback } from 'react';
+import {
+  View, Text, Pressable, StyleSheet, FlatList, SectionList,
+  Platform, Alert,
+} from 'react-native';
+import { router } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
+import Animated, { FadeInDown } from 'react-native-reanimated';
+import { useApp } from '@/contexts/AppContext';
+import Colors from '@/constants/colors';
+import { Owner, isOwnerExpired } from '@/lib/storage';
+
+export default function AdminDashboardScreen() {
+  const insets = useSafeAreaInsets();
+  const app = useApp();
+  const webTopInset = Platform.OS === 'web' ? 67 : 0;
+  const webBottomInset = Platform.OS === 'web' ? 34 : 0;
+  const topPad = (insets.top || webTopInset);
+
+  const sections = useMemo(() => {
+    const pending = app.owners.filter(o => o.status === 'pending');
+    const active = app.owners.filter(o => o.status === 'approved' && !isOwnerExpired(o));
+    const expired = app.owners.filter(o => o.status === 'approved' && isOwnerExpired(o));
+    const rejected = app.owners.filter(o => o.status === 'rejected');
+
+    const result: { title: string; data: Owner[]; type: string }[] = [];
+    if (pending.length > 0) result.push({ title: 'طلبات الانتظار', data: pending, type: 'pending' });
+    if (active.length > 0) result.push({ title: 'الحسابات النشطة', data: active, type: 'active' });
+    if (expired.length > 0) result.push({ title: 'حسابات منتهية الصلاحية', data: expired, type: 'expired' });
+    if (rejected.length > 0) result.push({ title: 'الحسابات المرفوضة', data: rejected, type: 'rejected' });
+    return result;
+  }, [app.owners]);
+
+  function handleLogout() {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    app.logout();
+    router.replace('/');
+  }
+
+  async function handleApprove(ownerId: string) {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    await app.approveOwner(ownerId);
+  }
+
+  async function handleReject(ownerId: string) {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    await app.rejectOwner(ownerId);
+  }
+
+  async function handleDelete(ownerId: string) {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    await app.deleteOwner(ownerId);
+  }
+
+  async function handleRenew(ownerId: string) {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    await app.renewOwner(ownerId);
+  }
+
+  function getDaysRemaining(owner: Owner): number {
+    if (!owner.activatedAt) return 0;
+    const activated = new Date(owner.activatedAt);
+    const now = new Date();
+    const diff = 30 - (now.getTime() - activated.getTime()) / (1000 * 60 * 60 * 24);
+    return Math.max(0, Math.ceil(diff));
+  }
+
+  const renderOwnerItem = useCallback(({ item, section }: { item: Owner; section: { type: string } }) => {
+    const sectionType = section.type;
+    const daysLeft = getDaysRemaining(item);
+    return (
+      <Animated.View entering={FadeInDown.duration(300)} style={styles.ownerCard}>
+        <View style={styles.ownerHeader}>
+          <View style={styles.ownerAvatar}>
+            <Feather name="user" size={20} color={Colors.primary} />
+          </View>
+          <View style={styles.ownerInfo}>
+            <Text style={styles.ownerName}>{item.name}</Text>
+            <Text style={styles.ownerEmail}>{item.email}</Text>
+            <Text style={styles.ownerPhone}>{item.phone}</Text>
+          </View>
+          {sectionType === 'active' ? (
+            <View style={styles.daysLeftBadge}>
+              <Text style={styles.daysLeftText}>{daysLeft} يوم</Text>
+            </View>
+          ) : null}
+        </View>
+
+        <View style={styles.ownerMeta}>
+          <Feather name="calendar" size={13} color={Colors.textMuted} />
+          <Text style={styles.metaText}>
+            تاريخ التسجيل: {new Date(item.createdAt).toLocaleDateString('ar-IQ')}
+          </Text>
+        </View>
+
+        <View style={styles.ownerActions}>
+          {sectionType === 'pending' ? (
+            <>
+              <Pressable
+                style={({ pressed }) => [styles.adminActionBtn, styles.approveBtn, pressed && { opacity: 0.7 }]}
+                onPress={() => handleApprove(item.id)}
+              >
+                <Feather name="check" size={16} color="#fff" />
+                <Text style={styles.adminActionBtnText}>قبول</Text>
+              </Pressable>
+              <Pressable
+                style={({ pressed }) => [styles.adminActionBtn, styles.rejectBtn, pressed && { opacity: 0.7 }]}
+                onPress={() => handleReject(item.id)}
+              >
+                <Feather name="x" size={16} color="#fff" />
+                <Text style={styles.adminActionBtnText}>رفض</Text>
+              </Pressable>
+            </>
+          ) : null}
+          {sectionType === 'expired' ? (
+            <Pressable
+              style={({ pressed }) => [styles.adminActionBtn, styles.renewBtn, pressed && { opacity: 0.7 }]}
+              onPress={() => handleRenew(item.id)}
+            >
+              <Feather name="refresh-cw" size={16} color="#fff" />
+              <Text style={styles.adminActionBtnText}>تجديد</Text>
+            </Pressable>
+          ) : null}
+          <Pressable
+            style={({ pressed }) => [styles.adminActionBtn, styles.deleteBtn, pressed && { opacity: 0.7 }]}
+            onPress={() => handleDelete(item.id)}
+          >
+            <Feather name="trash-2" size={16} color={Colors.error} />
+          </Pressable>
+        </View>
+      </Animated.View>
+    );
+  }, []);
+
+  return (
+    <View style={[styles.container, { paddingTop: topPad }]}>
+      <View style={styles.topBar}>
+        <View style={styles.topBarLeft}>
+          <View style={styles.adminBadge}>
+            <MaterialCommunityIcons name="shield-check" size={16} color="#D32F2F" />
+            <Text style={styles.adminBadgeText}>مشرف النظام</Text>
+          </View>
+          <Text style={styles.pageTitle}>إدارة المالكين</Text>
+        </View>
+        <Pressable onPress={handleLogout} style={styles.logoutBtn}>
+          <Feather name="log-out" size={20} color={Colors.error} />
+        </Pressable>
+      </View>
+
+      <View style={styles.statsBar}>
+        <View style={styles.miniStat}>
+          <Text style={styles.miniStatValue}>{app.owners.filter(o => o.status === 'pending').length}</Text>
+          <Text style={styles.miniStatLabel}>قيد الانتظار</Text>
+        </View>
+        <View style={styles.miniStatDivider} />
+        <View style={styles.miniStat}>
+          <Text style={styles.miniStatValue}>{app.owners.filter(o => o.status === 'approved' && !isOwnerExpired(o)).length}</Text>
+          <Text style={styles.miniStatLabel}>نشط</Text>
+        </View>
+        <View style={styles.miniStatDivider} />
+        <View style={styles.miniStat}>
+          <Text style={styles.miniStatValue}>{app.owners.filter(o => o.status === 'approved' && isOwnerExpired(o)).length}</Text>
+          <Text style={styles.miniStatLabel}>منتهي</Text>
+        </View>
+        <View style={styles.miniStatDivider} />
+        <View style={styles.miniStat}>
+          <Text style={styles.miniStatValue}>{app.owners.length}</Text>
+          <Text style={styles.miniStatLabel}>الإجمالي</Text>
+        </View>
+      </View>
+
+      <SectionList
+        sections={sections}
+        keyExtractor={(item) => item.id}
+        renderItem={renderOwnerItem}
+        renderSectionHeader={({ section: { title } }) => (
+          <Text style={styles.sectionTitle}>{title}</Text>
+        )}
+        contentContainerStyle={[styles.listContent, { paddingBottom: (insets.bottom || webBottomInset) + 20 }]}
+        showsVerticalScrollIndicator={false}
+        stickySectionHeadersEnabled={false}
+        ListEmptyComponent={
+          <View style={styles.emptyState}>
+            <Feather name="users" size={40} color={Colors.textMuted} />
+            <Text style={styles.emptyText}>لا توجد حسابات مسجلة</Text>
+          </View>
+        }
+      />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: Colors.background,
+  },
+  topBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+  },
+  topBarLeft: {
+    flex: 1,
+  },
+  adminBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(211, 47, 47, 0.08)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+    alignSelf: 'flex-start',
+    marginBottom: 4,
+  },
+  adminBadgeText: {
+    fontSize: 12,
+    fontFamily: 'Cairo_600SemiBold',
+    color: '#D32F2F',
+  },
+  pageTitle: {
+    fontSize: 22,
+    fontFamily: 'Cairo_700Bold',
+    color: Colors.text,
+    textAlign: 'right',
+  },
+  logoutBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: Colors.surface,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  statsBar: {
+    flexDirection: 'row',
+    backgroundColor: Colors.surface,
+    marginHorizontal: 16,
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 12,
+  },
+  miniStat: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  miniStatDivider: {
+    width: 1,
+    backgroundColor: Colors.divider,
+  },
+  miniStatValue: {
+    fontSize: 20,
+    fontFamily: 'Cairo_700Bold',
+    color: Colors.text,
+  },
+  miniStatLabel: {
+    fontSize: 11,
+    fontFamily: 'Cairo_400Regular',
+    color: Colors.textSecondary,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontFamily: 'Cairo_700Bold',
+    color: Colors.text,
+    textAlign: 'right',
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 8,
+  },
+  listContent: {
+    paddingHorizontal: 16,
+  },
+  ownerCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 10,
+  },
+  ownerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 10,
+  },
+  ownerAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: Colors.primaryFaded,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  ownerInfo: {
+    flex: 1,
+  },
+  ownerName: {
+    fontSize: 16,
+    fontFamily: 'Cairo_700Bold',
+    color: Colors.text,
+    textAlign: 'right',
+  },
+  ownerEmail: {
+    fontSize: 12,
+    fontFamily: 'Cairo_400Regular',
+    color: Colors.textSecondary,
+    textAlign: 'right',
+  },
+  ownerPhone: {
+    fontSize: 12,
+    fontFamily: 'Cairo_400Regular',
+    color: Colors.textMuted,
+    textAlign: 'right',
+  },
+  daysLeftBadge: {
+    backgroundColor: Colors.successLight,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  daysLeftText: {
+    fontSize: 12,
+    fontFamily: 'Cairo_600SemiBold',
+    color: Colors.success,
+  },
+  ownerMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 12,
+  },
+  metaText: {
+    fontSize: 12,
+    fontFamily: 'Cairo_400Regular',
+    color: Colors.textMuted,
+  },
+  ownerActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  adminActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 10,
+  },
+  adminActionBtnText: {
+    fontSize: 13,
+    fontFamily: 'Cairo_600SemiBold',
+    color: '#fff',
+  },
+  approveBtn: {
+    backgroundColor: Colors.success,
+  },
+  rejectBtn: {
+    backgroundColor: Colors.error,
+  },
+  renewBtn: {
+    backgroundColor: Colors.primary,
+  },
+  deleteBtn: {
+    backgroundColor: Colors.errorLight,
+    marginLeft: 'auto',
+  },
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: 60,
+    gap: 10,
+  },
+  emptyText: {
+    fontSize: 16,
+    fontFamily: 'Cairo_600SemiBold',
+    color: Colors.textMuted,
+  },
+});

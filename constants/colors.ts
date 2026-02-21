@@ -1,12 +1,36 @@
-// template
-const tintColorLight = "#2f95dc";
-
-export default {
+const Colors = {
+  primary: '#8A9A5B',
+  primaryDark: '#6B7A45',
+  primaryLight: '#A4B472',
+  primaryFaded: 'rgba(138, 154, 91, 0.12)',
+  background: '#F5F5F5',
+  surface: '#FFFFFF',
+  surfaceSecondary: '#ECECEC',
+  text: '#1A1A1A',
+  textSecondary: '#6B6B6B',
+  textMuted: '#9E9E9E',
+  gold: '#D4AF37',
+  goldLight: 'rgba(212, 175, 55, 0.15)',
+  silver: '#8E8E93',
+  silverLight: 'rgba(142, 142, 147, 0.15)',
+  bronze: '#CD7F32',
+  bronzeLight: 'rgba(205, 127, 50, 0.15)',
+  error: '#D32F2F',
+  errorLight: 'rgba(211, 47, 47, 0.1)',
+  success: '#388E3C',
+  successLight: 'rgba(56, 142, 60, 0.1)',
+  warning: '#F57C00',
+  warningLight: 'rgba(245, 124, 0, 0.1)',
+  border: '#E0E0E0',
+  divider: '#F0F0F0',
+  overlay: 'rgba(0, 0, 0, 0.5)',
   light: {
-    text: "#000",
-    background: "#fff",
-    tint: tintColorLight,
-    tabIconDefault: "#ccc",
-    tabIconSelected: tintColorLight,
+    text: '#1A1A1A',
+    background: '#F5F5F5',
+    tint: '#8A9A5B',
+    tabIconDefault: '#9E9E9E',
+    tabIconSelected: '#8A9A5B',
   },
 };
+
+export default Colors;
