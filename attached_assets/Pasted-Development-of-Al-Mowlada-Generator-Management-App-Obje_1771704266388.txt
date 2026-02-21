@@ -1,0 +1,46 @@
+Development of "Al-Mowlada" Generator Management App
+​Objective: Build a high-performance, cross-platform React Native application using Expo/Replit. The app manages subscription collections for private generator owners, featuring a dual-access system (Super Admin & Owner), high-fidelity Arabic UI, and a precise accounting engine.
+​1. Core Business & Accounting Logic
+​User Definition: The "User" is the Generator Owner.
+​Subscriber Types: Three tiers: Gold (Golden), Nightly (Silver), and Normal (Bronze).
+​Dynamic Monthly Pricing: The Owner must have an interface to set the Price per Ampere for each of the three tiers specifically for the current month.
+​Calculation Formula: * Total Due = (Monthly Tier Price) × (Number of Amperes).
+​Data Persistence: Pricing must be stored per month. Changing the price for "March" must not retroactively affect or change the records/calculations for "February."
+​2. Authentication & Security
+​Owner Login/Signup: A premium Sage Green interface. Signup requires: Name, Phone (+964), Email, and Password. New accounts are set to pending until approved by the Super Admin.
+​Hidden Admin Access: Above the input fields, place a subtle "Electricity Bolt" icon. A Long Press on this icon triggers the Super Admin login screen. 
+​Admin Credentials: Email: rb885491@gmail.com | Password: E4toy1234.
+​Session Security: Implement a background listener. If the app remains in the background for more than 30 seconds, the user is automatically logged out and must re-authenticate.
+​3. Owner Dashboard (User Interface)
+​Monthly Navigation: A horizontal scroll bar or tabs to switch between months.
+​Monthly Rate Settings: A configuration button to define the 3 tier prices for the selected month.
+​Summary Statistics (4 Cards): 
+​Total Amperes (All subscribers).
+​Total Collected (Actual payments received).
+​Total Outstanding (Total debt/remaining).
+​Monthly Expenses (Deducted from the Total Collected).
+​Subscriber Management: 
+​"Add New Subscriber" (Name, Phone, Amperes, Subscription Tier).
+​Subscribers added once appear automatically in all subsequent months.
+​Fields per subscriber: Due, Paid, Remaining, and Amperes.
+​WhatsApp Collection System: 
+​Full Payment: Updates status and triggers a WhatsApp message: "Full payment of [Amount] received for [Subscriber Name] on [Date]."
+​Partial Payment: Opens a modal to input amount; calculates remaining balance and sends a WhatsApp message with the payment details and the updated debt.
+​Cancel Payment: A "Revert" button to correct accidental entries.
+​4. Super Admin Capabilities
+​Owner Management: Approve/Reject registration requests, Delete accounts, and Renew subscriptions.
+​30-Day Expiry Policy: Owner accounts must deactivate automatically 30 days after activation. Deactivated users lose access to features but retain all their data. Access is restored only via Super Admin renewal.
+​Data Isolation: Ensure strict data separation; owners cannot see each other’s data, and the Super Admin cannot access specific subscriber financial details unless authorized.
+​5. UI/UX & Visual Identity
+​Theme: Premium Minimalist. Palette: Sage Green (#8A9A5B) with Off-White (#F5F5F5).
+​Tier Badges: 
+​Gold: Vibrant Metallic Gold.
+​Nightly: Metallic Silver/Grey.
+​Normal: Bronze/Copper.
+​Typography: Support for clear Arabic fonts (e.g., Cairo or Tajawal).
+​💡 Critical Programming Notes (Implementation Rules)
+​State Management: Utilize Context API or Redux to manage tier prices. Financial calculations must update globally and instantly when prices or payments are modified.
+​Schema Design: Store "Price per Ampere" inside a Month-specific object. Structure: data[year][month][prices]. This prevents global price changes from corrupting historical data.
+​WhatsApp Deep Linking: Sanitize phone numbers to international format (starting with 964, no leading zeros) when invoking whatsapp://send?text=....
+​Auto-Calculation: The "Remaining" field must be a computed property (Due - Paid). It must be read-only for the user to ensure accounting integrity.
+​Offline Support: Use AsyncStorage for local caching to ensure the app remains functional in areas with poor internet connectivity.
