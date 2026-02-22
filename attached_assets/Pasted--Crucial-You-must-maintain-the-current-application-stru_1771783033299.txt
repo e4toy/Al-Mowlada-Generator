@@ -1,0 +1,30 @@
+ Crucial: You must maintain the current application structure and logic. Ensure that recent changes I’ve made are preserved and not overwritten.
+​1. Subscriber Management & Filtering System
+​Enhance the subscriber view with a robust filtering and search mechanism:
+​Filter Logic: Add a toggle or dropdown to filter subscribers by status: [Paid] or [Unpaid].
+​Search Functionality: Implement a real-time search bar to filter subscribers by Name.
+​Data Editing: Add an "Edit Subscriber" modal/form allowing modification of:
+​Full Name
+​Phone Number
+​Number of Amperes
+​Subscription Type (e.g., Residential, Commercial).
+​2. Detailed Monthly Expense Module
+​Shift from a simple "total cost" input to a structured logging system:
+​Monthly Logs: Expenses must be grouped by month.
+​Itemized List: Each entry must include: [Expense Name/Type], [Amount], and [Date].
+​History View: The user should be able to review a full itemized list for any selected month to see exactly where the money was spent.
+​3. Owner Activation & Subscription Management
+​Pending Activation Screen: Create a "Waiting for Activation" UI for Generator Owners. If the is_active status is false, the owner should be locked into this screen and unable to access the dashboard until the Admin approves them.
+​Admin Renewal Feature: In the Admin Panel, add a "Renew Subscription" button for Generator Owners.
+​Allow the Admin to renew at any time (even before the current month ends).
+​Support Multi-Month Renewal (e.g., adding 3 or 6 months to the expiry date).
+​⚠️ Technical Constraints & Implementation Notes
+​Architecture Preservation: Do not refactor the global state management or navigation logic. Integrate these features into the existing components.
+​State Integrity: Ensure that adding the "Renewal" logic correctly updates the expiry_date in the database without affecting other owner metadata.
+​UI Consistency: Use the existing color palette and spacing. The "Waiting for Activation" screen should follow the app’s branding.
+​Error Handling:
+​Validate all numeric inputs (Amperes, Expense amounts).
+​Ensure the search bar is case-insensitive.
+​Prevent duplicate expense entries within the same millisecond.
+​Next Step for the Agent
+​"Please review the existing codebase to identify the relevant models and controllers. Once identified, proceed with the implementation of the Filtering System first, then move to the Expense Module. Confirm when you are ready to start."

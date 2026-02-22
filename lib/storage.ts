@@ -17,6 +17,7 @@ export interface Owner {
   password: string;
   status: 'pending' | 'approved' | 'rejected';
   activatedAt: string | null;
+  expiryDate: string | null;
   createdAt: string;
 }
 
@@ -49,6 +50,7 @@ export interface Expense {
   month: string;
   description: string;
   amount: number;
+  date: string;
 }
 
 export type Session = { type: 'owner'; ownerId: string } | { type: 'admin' } | null;
@@ -135,12 +137,30 @@ export function sanitizePhone(phone: string): string {
 }
 
 export function isOwnerExpired(owner: Owner): boolean {
+  if (owner.expiryDate) {
+    return new Date() > new Date(owner.expiryDate);
+  }
   if (!owner.activatedAt) return false;
   const activated = new Date(owner.activatedAt);
   const now = new Date();
   const diff = now.getTime() - activated.getTime();
   const days = diff / (1000 * 60 * 60 * 24);
   return days > 30;
+}
+
+export function getOwnerExpiryDate(owner: Owner): Date | null {
+  if (owner.expiryDate) return new Date(owner.expiryDate);
+  if (!owner.activatedAt) return null;
+  const d = new Date(owner.activatedAt);
+  d.setDate(d.getDate() + 30);
+  return d;
+}
+
+export function getDaysRemaining(owner: Owner): number {
+  const expiry = getOwnerExpiryDate(owner);
+  if (!expiry) return 0;
+  const diff = expiry.getTime() - Date.now();
+  return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
 }
 
 export function getTierColor(tier: 'gold' | 'silver' | 'bronze'): string {
