@@ -57,6 +57,8 @@ export default function LoginScreen() {
     if (result.success) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       router.replace('/dashboard');
+    } else if (result.pending) {
+      router.replace('/pending');
     } else {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       setError(result.message);
