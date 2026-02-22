@@ -3,7 +3,7 @@ import { AppState, AppStateStatus } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import {
   Storage, Owner, Subscriber, MonthlyPricing, Payment, Expense, Session,
-  ADMIN_EMAIL, ADMIN_PASSWORD, isOwnerExpired, getMonthKey,
+  ADMIN_EMAIL, ADMIN_PASSWORD, isOwnerExpired, getMonthKey, getOwnerExpiryDate,
 } from '@/lib/storage';
 
 interface AppContextValue {
@@ -15,11 +15,12 @@ interface AppContextValue {
   pricing: Record<string, MonthlyPricing>;
   payments: Payment[];
   expenses: Expense[];
-  login: (email: string, password: string) => Promise<{ success: boolean; message: string }>;
+  login: (email: string, password: string) => Promise<{ success: boolean; message: string; pending?: boolean }>;
   signup: (name: string, phone: string, email: string, password: string) => Promise<{ success: boolean; message: string }>;
   adminLogin: (email: string, password: string) => Promise<boolean>;
   logout: () => Promise<void>;
   addSubscriber: (data: Omit<Subscriber, 'id'>) => Promise<void>;
+  updateSubscriber: (id: string, data: Partial<Omit<Subscriber, 'id'>>) => Promise<void>;
   deleteSubscriber: (id: string) => Promise<void>;
   setPricing: (month: string, prices: MonthlyPricing) => Promise<void>;
   recordPayment: (subscriberId: string, month: string, amount: number, type: 'full' | 'partial') => Promise<void>;
@@ -29,7 +30,7 @@ interface AppContextValue {
   approveOwner: (ownerId: string) => Promise<void>;
   rejectOwner: (ownerId: string) => Promise<void>;
   deleteOwner: (ownerId: string) => Promise<void>;
-  renewOwner: (ownerId: string) => Promise<void>;
+  renewOwner: (ownerId: string, months?: number) => Promise<void>;
   refreshOwners: () => Promise<void>;
   getSubscriberPayments: (subscriberId: string, month: string) => Payment[];
   getSubscriberDue: (subscriber: Subscriber, month: string) => number;
@@ -113,12 +114,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setExpenses(exps);
   }
 
-  const login = useCallback(async (email: string, password: string): Promise<{ success: boolean; message: string }> => {
+  const login = useCallback(async (email: string, password: string): Promise<{ success: boolean; message: string; pending?: boolean }> => {
     const allOwners = await Storage.getOwners();
     const owner = allOwners.find(o => o.email.toLowerCase() === email.toLowerCase());
     if (!owner) return { success: false, message: 'البريد الإلكتروني غير مسجل' };
     if (owner.password !== password) return { success: false, message: 'كلمة المرور غير صحيحة' };
-    if (owner.status === 'pending') return { success: false, message: 'حسابك قيد المراجعة من قبل المشرف' };
+    if (owner.status === 'pending') {
+      setCurrentOwner(owner);
+      setOwners(allOwners);
+      return { success: false, message: 'حسابك قيد المراجعة من قبل المشرف', pending: true };
+    }
     if (owner.status === 'rejected') return { success: false, message: 'تم رفض حسابك' };
     if (isOwnerExpired(owner)) return { success: false, message: 'انتهت صلاحية حسابك، يرجى التواصل مع المشرف للتجديد' };
 
@@ -141,6 +146,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       name, phone, email, password,
       status: 'pending',
       activatedAt: null,
+      expiryDate: null,
       createdAt: new Date().toISOString(),
     };
     allOwners.push(newOwner);
@@ -174,6 +180,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!currentOwner) return;
     const sub: Subscriber = { ...data, id: Crypto.randomUUID() };
     const updated = [...subscribers, sub];
+    setSubscribers(updated);
+    await Storage.saveSubscribers(currentOwner.id, updated);
+  }, [currentOwner, subscribers]);
+
+  const updateSubscriber = useCallback(async (id: string, data: Partial<Omit<Subscriber, 'id'>>) => {
+    if (!currentOwner) return;
+    const updated = subscribers.map(s => s.id === id ? { ...s, ...data } : s);
     setSubscribers(updated);
     await Storage.saveSubscribers(currentOwner.id, updated);
   }, [currentOwner, subscribers]);
@@ -216,7 +229,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const addExpense = useCallback(async (month: string, description: string, amount: number) => {
     if (!currentOwner) return;
-    const expense: Expense = { id: Crypto.randomUUID(), month, description, amount };
+    const expense: Expense = { id: Crypto.randomUUID(), month, description, amount, date: new Date().toISOString() };
     const updated = [...expenses, expense];
     setExpenses(updated);
     await Storage.saveExpenses(currentOwner.id, updated);
@@ -230,8 +243,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [currentOwner, expenses]);
 
   const approveOwner = useCallback(async (ownerId: string) => {
+    const now = new Date();
+    const expiry = new Date(now);
+    expiry.setDate(expiry.getDate() + 30);
     const updated = owners.map(o =>
-      o.id === ownerId ? { ...o, status: 'approved' as const, activatedAt: new Date().toISOString() } : o
+      o.id === ownerId ? { ...o, status: 'approved' as const, activatedAt: now.toISOString(), expiryDate: expiry.toISOString() } : o
     );
     setOwners(updated);
     await Storage.saveOwners(updated);
@@ -251,10 +267,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
     await Storage.saveOwners(updated);
   }, [owners]);
 
-  const renewOwner = useCallback(async (ownerId: string) => {
-    const updated = owners.map(o =>
-      o.id === ownerId ? { ...o, status: 'approved' as const, activatedAt: new Date().toISOString() } : o
-    );
+  const renewOwner = useCallback(async (ownerId: string, months: number = 1) => {
+    const updated = owners.map(o => {
+      if (o.id !== ownerId) return o;
+      const now = new Date();
+      let baseDate = now;
+      if (o.expiryDate) {
+        const existing = new Date(o.expiryDate);
+        if (existing > now) baseDate = existing;
+      }
+      const expiry = new Date(baseDate);
+      expiry.setDate(expiry.getDate() + (months * 30));
+      return {
+        ...o,
+        status: 'approved' as const,
+        activatedAt: o.activatedAt || now.toISOString(),
+        expiryDate: expiry.toISOString(),
+      };
+    });
     setOwners(updated);
     await Storage.saveOwners(updated);
   }, [owners]);
@@ -283,7 +313,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const value = useMemo(() => ({
     session, loading, currentOwner, owners, subscribers, pricing, payments, expenses,
     login, signup, adminLogin, logout,
-    addSubscriber, deleteSubscriber, setPricing,
+    addSubscriber, updateSubscriber, deleteSubscriber, setPricing,
     recordPayment, cancelPayment,
     addExpense, deleteExpense,
     approveOwner, rejectOwner, deleteOwner, renewOwner,
@@ -291,7 +321,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }), [
     session, loading, currentOwner, owners, subscribers, pricing, payments, expenses,
     login, signup, adminLogin, logout,
-    addSubscriber, deleteSubscriber, setPricing,
+    addSubscriber, updateSubscriber, deleteSubscriber, setPricing,
     recordPayment, cancelPayment,
     addExpense, deleteExpense,
     approveOwner, rejectOwner, deleteOwner, renewOwner,
