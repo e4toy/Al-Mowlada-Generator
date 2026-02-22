@@ -162,7 +162,7 @@ export function getTierBgColor(tier: 'gold' | 'silver' | 'bronze'): string {
 export function getTierLabel(tier: 'gold' | 'silver' | 'bronze'): string {
   switch (tier) {
     case 'gold': return 'ذهبي';
-    case 'silver': return 'فضي';
-    case 'bronze': return 'برونزي';
+    case 'silver': return 'ليلي';
+    case 'bronze': return 'عادي';
   }
 }

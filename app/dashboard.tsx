@@ -322,10 +322,10 @@ export default function DashboardScreen() {
       </ScrollView>
 
       <ScrollView style={styles.statsRow} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.statsContent}>
-        <StatCard icon="flash" label="إجمالي الأمبيرات" value={stats.totalAmperes.toString()} color={Colors.primary} />
-        <StatCard icon="arrow-down-circle" label="إجمالي المحصّل" value={stats.totalCollected.toLocaleString()} color={Colors.success} />
-        <StatCard icon="arrow-up-circle" label="المتبقي" value={stats.totalOutstanding.toLocaleString()} color={Colors.error} />
-        <StatCard icon="trending-down" label="المصاريف" value={stats.totalExpenses.toLocaleString()} color={Colors.warning} />
+        <StatCard icon="zap" label="إجمالي الأمبيرات" value={stats.totalAmperes.toString()} color={Colors.primary} />
+        <StatCard icon="dollar-sign" label="إجمالي المحصّل" value={stats.totalCollected.toLocaleString()} color={Colors.success} />
+        <StatCard icon="cash" label="المتبقي" value={stats.totalOutstanding.toLocaleString()} color={Colors.error} />
+        <StatCard icon="clock" label="المصاريف" value={stats.totalExpenses.toLocaleString()} color={Colors.warning} />
       </ScrollView>
 
       {!monthPricing ? (
@@ -343,6 +343,7 @@ export default function DashboardScreen() {
         keyExtractor={(item) => item.id}
         renderItem={renderSubscriberItem}
         contentContainerStyle={[styles.listContent, { paddingBottom: bottomPad + 80 }]}
+        style={{ marginTop: -18 }}
         showsVerticalScrollIndicator={false}
         scrollEnabled={!!monthSubscribers.length}
         ListEmptyComponent={
@@ -411,13 +412,13 @@ export default function DashboardScreen() {
 
               <View style={styles.pricingRow}>
                 <View style={[styles.pricingDot, { backgroundColor: Colors.silver }]} />
-                <Text style={styles.modalLabel}>سعر الأمبير الفضي</Text>
+                <Text style={styles.modalLabel}>سعر الأمبير الليلي</Text>
               </View>
               <TextInput style={styles.modalInput} value={priceSilver} onChangeText={setPriceSilver} placeholder="0" placeholderTextColor={Colors.textMuted} keyboardType="numeric" textAlign={I18nManager.isRTL ? 'right' : 'left'} />
 
               <View style={styles.pricingRow}>
                 <View style={[styles.pricingDot, { backgroundColor: Colors.bronze }]} />
-                <Text style={styles.modalLabel}>سعر الأمبير البرونزي</Text>
+                <Text style={styles.modalLabel}>سعر الأمبير العادي</Text>
               </View>
               <TextInput style={styles.modalInput} value={priceBronze} onChangeText={setPriceBronze} placeholder="0" placeholderTextColor={Colors.textMuted} keyboardType="numeric" textAlign={I18nManager.isRTL ? 'right' : 'left'} />
 
@@ -537,21 +538,30 @@ const statStyles = StyleSheet.create({
     gap: 6,
   },
   iconBg: {
-    width: 34,
-    height: 34,
+    width: 25,
+    minHeight: 25,
     borderRadius: 10,
     justifyContent: 'center',
     alignItems: 'center',
   },
   value: {
-    fontSize: 20,
+    fontSize: 14,
     fontFamily: 'Cairo_700Bold',
     color: Colors.text,
+    lineHeight: 18,
+    position: 'relative',
+    right: -48,
+    bottom: 35,
   },
   label: {
-    fontSize: 11,
+    fontSize: 9,
     fontFamily: 'Cairo_400Regular',
     color: Colors.textSecondary,
+    marginTop: 2,
+    textAlign: 'center',
+    position: "relative",
+    bottom: 40,
+    left: 20,
   },
 });
 
@@ -583,16 +593,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   ownerName: {
-    fontSize: 20,
+    fontSize: 10,
     fontFamily: 'Cairo_700Bold',
     color: Colors.text,
-    textAlign: 'right',
+    textAlign: 'center',
   },
   ownerLabel: {
-    fontSize: 12,
+    fontSize: 10,
     fontFamily: 'Cairo_400Regular',
     color: Colors.textSecondary,
-    textAlign: 'right',
+    textAlign: 'center',
   },
   yearRow: {
     flexDirection: 'row',
@@ -608,7 +618,9 @@ const styles = StyleSheet.create({
   },
   monthScrollContainer: {
     maxHeight: 44,
-    marginBottom: 8,
+    marginBottom: 5,
+    flexShrink: 0,
+    height: 40,
   },
   monthScroll: {
     paddingHorizontal: 16,
@@ -632,12 +644,17 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
   statsRow: {
-    maxHeight: 130,
-    marginBottom: 4,
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    marginBottom: 5,
+    minHeight: 75,
   },
   statsContent: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    flex: 1,
+    height: '80%',
+    paddingVertical: 4,
+    marginHorizontal: 4,
+    borderRadius: 12,
   },
   noPricingBanner: {
     flexDirection: 'row',
@@ -677,6 +694,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 12,
+    marginTop: -15,
   },
   subInfo: {
     flexDirection: 'row',
@@ -797,10 +815,10 @@ const styles = StyleSheet.create({
   },
   fab: {
     position: 'absolute',
-    bottom: 100,
-    left: 20,
-    width: 56,
-    height: 56,
+    bottom: 45,
+    right: 20,
+    width: 50,
+    height: 50,
     borderRadius: 28,
     backgroundColor: Colors.primary,
     justifyContent: 'center',
