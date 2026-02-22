@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import {
-  View, Text, Pressable, StyleSheet, FlatList, SectionList,
-  Platform, Alert,
+  View, Text, Pressable, StyleSheet, SectionList, Modal,
+  Platform,
 } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -10,7 +10,7 @@ import * as Haptics from 'expo-haptics';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useApp } from '@/contexts/AppContext';
 import Colors from '@/constants/colors';
-import { Owner, isOwnerExpired } from '@/lib/storage';
+import { Owner, isOwnerExpired, getDaysRemaining, getOwnerExpiryDate } from '@/lib/storage';
 
 export default function AdminDashboardScreen() {
   const insets = useSafeAreaInsets();
@@ -18,6 +18,9 @@ export default function AdminDashboardScreen() {
   const webTopInset = Platform.OS === 'web' ? 67 : 0;
   const webBottomInset = Platform.OS === 'web' ? 34 : 0;
   const topPad = (insets.top || webTopInset);
+
+  const [renewModal, setRenewModal] = useState(false);
+  const [renewTarget, setRenewTarget] = useState<Owner | null>(null);
 
   const sections = useMemo(() => {
     const pending = app.owners.filter(o => o.status === 'pending');
@@ -54,22 +57,23 @@ export default function AdminDashboardScreen() {
     await app.deleteOwner(ownerId);
   }
 
-  async function handleRenew(ownerId: string) {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    await app.renewOwner(ownerId);
+  function openRenewModal(owner: Owner) {
+    setRenewTarget(owner);
+    setRenewModal(true);
   }
 
-  function getDaysRemaining(owner: Owner): number {
-    if (!owner.activatedAt) return 0;
-    const activated = new Date(owner.activatedAt);
-    const now = new Date();
-    const diff = 30 - (now.getTime() - activated.getTime()) / (1000 * 60 * 60 * 24);
-    return Math.max(0, Math.ceil(diff));
+  async function handleRenew(months: number) {
+    if (!renewTarget) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    await app.renewOwner(renewTarget.id, months);
+    setRenewModal(false);
+    setRenewTarget(null);
   }
 
   const renderOwnerItem = useCallback(({ item, section }: { item: Owner; section: { type: string } }) => {
     const sectionType = section.type;
     const daysLeft = getDaysRemaining(item);
+    const expiryDate = getOwnerExpiryDate(item);
     return (
       <Animated.View entering={FadeInDown.duration(300)} style={styles.ownerCard}>
         <View style={styles.ownerHeader}>
@@ -94,6 +98,14 @@ export default function AdminDashboardScreen() {
             تاريخ التسجيل: {new Date(item.createdAt).toLocaleDateString('ar-IQ')}
           </Text>
         </View>
+        {expiryDate && (sectionType === 'active' || sectionType === 'expired') ? (
+          <View style={styles.ownerMeta}>
+            <Feather name="clock" size={13} color={sectionType === 'expired' ? Colors.error : Colors.textMuted} />
+            <Text style={[styles.metaText, sectionType === 'expired' && { color: Colors.error }]}>
+              تاريخ الانتهاء: {expiryDate.toLocaleDateString('ar-IQ')}
+            </Text>
+          </View>
+        ) : null}
 
         <View style={styles.ownerActions}>
           {sectionType === 'pending' ? (
@@ -114,10 +126,10 @@ export default function AdminDashboardScreen() {
               </Pressable>
             </>
           ) : null}
-          {sectionType === 'expired' ? (
+          {sectionType === 'active' || sectionType === 'expired' ? (
             <Pressable
               style={({ pressed }) => [styles.adminActionBtn, styles.renewBtn, pressed && { opacity: 0.7 }]}
-              onPress={() => handleRenew(item.id)}
+              onPress={() => openRenewModal(item)}
             >
               <Feather name="refresh-cw" size={16} color="#fff" />
               <Text style={styles.adminActionBtnText}>تجديد</Text>
@@ -133,6 +145,12 @@ export default function AdminDashboardScreen() {
       </Animated.View>
     );
   }, []);
+
+  const renewOptions = [
+    { months: 1, label: 'شهر واحد', sublabel: '30 يوم' },
+    { months: 3, label: '3 أشهر', sublabel: '90 يوم' },
+    { months: 6, label: '6 أشهر', sublabel: '180 يوم' },
+  ];
 
   return (
     <View style={[styles.container, { paddingTop: topPad }]}>
@@ -188,6 +206,42 @@ export default function AdminDashboardScreen() {
           </View>
         }
       />
+
+      {/* Renewal Modal */}
+      <Modal visible={renewModal} animationType="slide" transparent>
+        <View style={styles.renewOverlay}>
+          <View style={styles.renewContent}>
+            <View style={styles.renewHeader}>
+              <Text style={styles.renewTitle}>تجديد الاشتراك</Text>
+              <Pressable onPress={() => setRenewModal(false)}>
+                <Feather name="x" size={22} color={Colors.text} />
+              </Pressable>
+            </View>
+            {renewTarget ? (
+              <View style={styles.renewBody}>
+                <View style={styles.renewOwnerInfo}>
+                  <Feather name="user" size={18} color={Colors.primary} />
+                  <Text style={styles.renewOwnerName}>{renewTarget.name}</Text>
+                </View>
+                <Text style={styles.renewSubtitle}>اختر مدة التجديد</Text>
+                {renewOptions.map((opt) => (
+                  <Pressable
+                    key={opt.months}
+                    style={({ pressed }) => [styles.renewOption, pressed && { opacity: 0.7 }]}
+                    onPress={() => handleRenew(opt.months)}
+                  >
+                    <View style={styles.renewOptionLeft}>
+                      <Text style={styles.renewOptionLabel}>{opt.label}</Text>
+                      <Text style={styles.renewOptionSub}>{opt.sublabel}</Text>
+                    </View>
+                    <Feather name="chevron-left" size={20} color={Colors.primary} />
+                  </Pressable>
+                ))}
+              </View>
+            ) : null}
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -331,7 +385,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    marginBottom: 12,
+    marginBottom: 6,
   },
   metaText: {
     fontSize: 12,
@@ -341,6 +395,7 @@ const styles = StyleSheet.create({
   ownerActions: {
     flexDirection: 'row',
     gap: 8,
+    marginTop: 6,
   },
   adminActionBtn: {
     flexDirection: 'row',
@@ -377,5 +432,80 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: 'Cairo_600SemiBold',
     color: Colors.textMuted,
+  },
+  renewOverlay: {
+    flex: 1,
+    backgroundColor: Colors.overlay,
+    justifyContent: 'flex-end',
+  },
+  renewContent: {
+    backgroundColor: Colors.surface,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+  },
+  renewHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.divider,
+  },
+  renewTitle: {
+    fontSize: 18,
+    fontFamily: 'Cairo_700Bold',
+    color: Colors.text,
+    flex: 1,
+    textAlign: 'right',
+  },
+  renewBody: {
+    padding: 20,
+    gap: 14,
+  },
+  renewOwnerInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    justifyContent: 'flex-end',
+    backgroundColor: Colors.primaryFaded,
+    padding: 12,
+    borderRadius: 12,
+  },
+  renewOwnerName: {
+    fontSize: 16,
+    fontFamily: 'Cairo_700Bold',
+    color: Colors.primary,
+  },
+  renewSubtitle: {
+    fontSize: 14,
+    fontFamily: 'Cairo_600SemiBold',
+    color: Colors.textSecondary,
+    textAlign: 'right',
+  },
+  renewOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: Colors.background,
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  renewOptionLeft: {
+    gap: 2,
+  },
+  renewOptionLabel: {
+    fontSize: 16,
+    fontFamily: 'Cairo_700Bold',
+    color: Colors.text,
+    textAlign: 'right',
+  },
+  renewOptionSub: {
+    fontSize: 12,
+    fontFamily: 'Cairo_400Regular',
+    color: Colors.textMuted,
+    textAlign: 'right',
   },
 });

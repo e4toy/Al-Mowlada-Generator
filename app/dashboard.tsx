@@ -1,21 +1,22 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import {
   View, Text, Pressable, StyleSheet, FlatList, Modal, TextInput,
-  Platform, Linking, ScrollView, Alert, I18nManager,
+  Platform, Linking, ScrollView, I18nManager,
 } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Feather, MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
+import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useApp } from '@/contexts/AppContext';
 import Colors from '@/constants/colors';
 import {
-  Subscriber, Payment, getMonthKey, getMonthLabel,
+  Subscriber, Payment, Expense, getMonthKey, getMonthLabel,
   getTierColor, getTierBgColor, getTierLabel, sanitizePhone,
 } from '@/lib/storage';
 
-type ModalType = 'none' | 'addSubscriber' | 'setPricing' | 'partialPayment' | 'addExpense' | 'payments';
+type ModalType = 'none' | 'addSubscriber' | 'editSubscriber' | 'setPricing' | 'partialPayment' | 'addExpense' | 'expenseHistory' | 'payments';
+type FilterType = 'all' | 'paid' | 'unpaid';
 
 export default function DashboardScreen() {
   const insets = useSafeAreaInsets();
@@ -33,10 +34,18 @@ export default function DashboardScreen() {
   const [modal, setModal] = useState<ModalType>('none');
   const [activeSubscriber, setActiveSubscriber] = useState<Subscriber | null>(null);
 
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<FilterType>('all');
+
   const [newSubName, setNewSubName] = useState('');
   const [newSubPhone, setNewSubPhone] = useState('');
   const [newSubAmperes, setNewSubAmperes] = useState('');
   const [newSubTier, setNewSubTier] = useState<'gold' | 'silver' | 'bronze'>('gold');
+
+  const [editSubName, setEditSubName] = useState('');
+  const [editSubPhone, setEditSubPhone] = useState('');
+  const [editSubAmperes, setEditSubAmperes] = useState('');
+  const [editSubTier, setEditSubTier] = useState<'gold' | 'silver' | 'bronze'>('gold');
 
   const [priceGold, setPriceGold] = useState('');
   const [priceSilver, setPriceSilver] = useState('');
@@ -64,7 +73,29 @@ export default function DashboardScreen() {
     return app.subscribers.filter(s => s.createdMonth <= selectedMonth);
   }, [app.subscribers, selectedMonth]);
 
+  const filteredSubscribers = useMemo(() => {
+    let list = monthSubscribers;
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      list = list.filter(s => s.name.toLowerCase().includes(q));
+    }
+    if (statusFilter !== 'all') {
+      list = list.filter(s => {
+        const due = app.getSubscriberDue(s, selectedMonth);
+        const paid = app.getSubscriberPaid(s.id, selectedMonth);
+        const remaining = due - paid;
+        if (statusFilter === 'paid') return remaining <= 0 && due > 0;
+        return remaining > 0 || due === 0;
+      });
+    }
+    return list;
+  }, [monthSubscribers, searchQuery, statusFilter, selectedMonth, app]);
+
   const monthPricing = app.pricing[selectedMonth];
+
+  const monthExpenses = useMemo(() => {
+    return app.expenses.filter(e => e.month === selectedMonth);
+  }, [app.expenses, selectedMonth]);
 
   const stats = useMemo(() => {
     let totalAmperes = 0;
@@ -75,16 +106,14 @@ export default function DashboardScreen() {
       totalDue += app.getSubscriberDue(sub, selectedMonth);
       totalPaid += app.getSubscriberPaid(sub.id, selectedMonth);
     });
-    const totalExpenses = app.expenses
-      .filter(e => e.month === selectedMonth)
-      .reduce((sum, e) => sum + e.amount, 0);
+    const totalExpenses = monthExpenses.reduce((sum, e) => sum + e.amount, 0);
     return {
       totalAmperes,
       totalCollected: totalPaid,
       totalOutstanding: totalDue - totalPaid,
       totalExpenses,
     };
-  }, [monthSubscribers, selectedMonth, app]);
+  }, [monthSubscribers, selectedMonth, app, monthExpenses]);
 
   function openPricingModal() {
     const p = app.pricing[selectedMonth];
@@ -98,6 +127,7 @@ export default function DashboardScreen() {
     const g = parseFloat(priceGold) || 0;
     const s = parseFloat(priceSilver) || 0;
     const b = parseFloat(priceBronze) || 0;
+    if (g < 0 || s < 0 || b < 0) return;
     await app.setPricing(selectedMonth, { gold: g, silver: s, bronze: b });
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     setModal('none');
@@ -113,12 +143,37 @@ export default function DashboardScreen() {
 
   async function saveSubscriber() {
     if (!newSubName.trim() || !newSubAmperes.trim()) return;
+    const ampVal = parseFloat(newSubAmperes);
+    if (isNaN(ampVal) || ampVal <= 0) return;
     await app.addSubscriber({
       name: newSubName.trim(),
       phone: newSubPhone.trim(),
-      amperes: parseFloat(newSubAmperes) || 0,
+      amperes: ampVal,
       tier: newSubTier,
       createdMonth: selectedMonth,
+    });
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    setModal('none');
+  }
+
+  function openEditSubscriber(sub: Subscriber) {
+    setActiveSubscriber(sub);
+    setEditSubName(sub.name);
+    setEditSubPhone(sub.phone);
+    setEditSubAmperes(sub.amperes.toString());
+    setEditSubTier(sub.tier);
+    setModal('editSubscriber');
+  }
+
+  async function saveEditSubscriber() {
+    if (!activeSubscriber || !editSubName.trim() || !editSubAmperes.trim()) return;
+    const ampVal = parseFloat(editSubAmperes);
+    if (isNaN(ampVal) || ampVal <= 0) return;
+    await app.updateSubscriber(activeSubscriber.id, {
+      name: editSubName.trim(),
+      phone: editSubPhone.trim(),
+      amperes: ampVal,
+      tier: editSubTier,
     });
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     setModal('none');
@@ -143,8 +198,8 @@ export default function DashboardScreen() {
 
   async function savePartialPayment() {
     if (!activeSubscriber || !partialAmount.trim()) return;
-    const amount = parseFloat(partialAmount) || 0;
-    if (amount <= 0) return;
+    const amount = parseFloat(partialAmount);
+    if (isNaN(amount) || amount <= 0) return;
     await app.recordPayment(activeSubscriber.id, selectedMonth, amount, 'partial');
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     const due = app.getSubscriberDue(activeSubscriber, selectedMonth);
@@ -180,9 +235,16 @@ export default function DashboardScreen() {
 
   async function saveExpense() {
     if (!expenseDesc.trim() || !expenseAmount.trim()) return;
-    await app.addExpense(selectedMonth, expenseDesc.trim(), parseFloat(expenseAmount) || 0);
+    const amt = parseFloat(expenseAmount);
+    if (isNaN(amt) || amt <= 0) return;
+    await app.addExpense(selectedMonth, expenseDesc.trim(), amt);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     setModal('none');
+  }
+
+  async function handleDeleteExpense(id: string) {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    await app.deleteExpense(id);
   }
 
   function handleLogout() {
@@ -209,9 +271,18 @@ export default function DashboardScreen() {
               <Text style={[styles.tierText, { color: getTierColor(item.tier) }]}>{getTierLabel(item.tier)}</Text>
             </View>
           </View>
-          <View style={styles.amperesBox}>
-            <MaterialCommunityIcons name="flash" size={14} color={Colors.primary} />
-            <Text style={styles.amperesText}>{item.amperes}A</Text>
+          <View style={styles.subHeaderRight}>
+            <View style={styles.amperesBox}>
+              <MaterialCommunityIcons name="flash" size={14} color={Colors.primary} />
+              <Text style={styles.amperesText}>{item.amperes}A</Text>
+            </View>
+            <Pressable
+              onPress={() => openEditSubscriber(item)}
+              hitSlop={6}
+              style={({ pressed }) => [styles.editIconBtn, pressed && { opacity: 0.6 }]}
+            >
+              <Feather name="edit-2" size={14} color={Colors.textSecondary} />
+            </Pressable>
           </View>
         </View>
 
@@ -277,6 +348,9 @@ export default function DashboardScreen() {
           <Text style={styles.ownerLabel}>لوحة التحكم</Text>
         </View>
         <View style={styles.topBarRight}>
+          <Pressable onPress={() => setModal('expenseHistory')} hitSlop={6} style={styles.topIconBtn}>
+            <Feather name="file-text" size={20} color={Colors.text} />
+          </Pressable>
           <Pressable onPress={openExpenseModal} hitSlop={6} style={styles.topIconBtn}>
             <Feather name="dollar-sign" size={20} color={Colors.text} />
           </Pressable>
@@ -324,8 +398,8 @@ export default function DashboardScreen() {
       <ScrollView style={styles.statsRow} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.statsContent}>
         <StatCard icon="zap" label="إجمالي الأمبيرات" value={stats.totalAmperes.toString()} color={Colors.primary} />
         <StatCard icon="dollar-sign" label="إجمالي المحصّل" value={stats.totalCollected.toLocaleString()} color={Colors.success} />
-        <StatCard icon="cash" label="المتبقي" value={stats.totalOutstanding.toLocaleString()} color={Colors.error} />
-        <StatCard icon="clock" label="المصاريف" value={stats.totalExpenses.toLocaleString()} color={Colors.warning} />
+        <StatCard icon="trending-up" label="المتبقي" value={stats.totalOutstanding.toLocaleString()} color={Colors.error} />
+        <StatCard icon="clipboard" label="المصاريف" value={stats.totalExpenses.toLocaleString()} color={Colors.warning} />
       </ScrollView>
 
       {!monthPricing ? (
@@ -338,19 +412,55 @@ export default function DashboardScreen() {
         </View>
       ) : null}
 
+      <View style={styles.searchFilterRow}>
+        <View style={styles.searchBox}>
+          <Feather name="search" size={16} color={Colors.textMuted} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="بحث بالاسم..."
+            placeholderTextColor={Colors.textMuted}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            textAlign={I18nManager.isRTL ? 'right' : 'left'}
+          />
+          {searchQuery ? (
+            <Pressable onPress={() => setSearchQuery('')} hitSlop={6}>
+              <Feather name="x" size={16} color={Colors.textMuted} />
+            </Pressable>
+          ) : null}
+        </View>
+        <View style={styles.filterRow}>
+          {(['all', 'paid', 'unpaid'] as FilterType[]).map((f) => (
+            <Pressable
+              key={f}
+              onPress={() => setStatusFilter(f)}
+              style={[styles.filterChip, statusFilter === f && styles.filterChipActive]}
+            >
+              <Text style={[styles.filterChipText, statusFilter === f && styles.filterChipTextActive]}>
+                {f === 'all' ? 'الكل' : f === 'paid' ? 'مدفوع' : 'غير مدفوع'}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      </View>
+
       <FlatList
-        data={monthSubscribers}
+        data={filteredSubscribers}
         keyExtractor={(item) => item.id}
         renderItem={renderSubscriberItem}
         contentContainerStyle={[styles.listContent, { paddingBottom: bottomPad + 80 }]}
         style={{ marginTop: -18 }}
         showsVerticalScrollIndicator={false}
-        scrollEnabled={!!monthSubscribers.length}
+        scrollEnabled={!!filteredSubscribers.length}
         ListEmptyComponent={
           <View style={styles.emptyState}>
             <Feather name="users" size={40} color={Colors.textMuted} />
-            <Text style={styles.emptyText}>لا يوجد مشتركون لهذا الشهر</Text>
-            <Text style={styles.emptySubText}>أضف مشتركين جدد لبدء الإدارة</Text>
+            <Text style={styles.emptyText}>
+              {searchQuery || statusFilter !== 'all' ? 'لا توجد نتائج مطابقة' : 'لا يوجد مشتركون لهذا الشهر'}
+            </Text>
+            {!searchQuery && statusFilter === 'all' ? (
+              <Text style={styles.emptySubText}>أضف مشتركين جدد لبدء الإدارة</Text>
+            ) : null}
           </View>
         }
       />
@@ -362,6 +472,7 @@ export default function DashboardScreen() {
         <Feather name="plus" size={24} color="#fff" />
       </Pressable>
 
+      {/* Add Subscriber Modal */}
       <Modal visible={modal === 'addSubscriber'} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -396,6 +507,42 @@ export default function DashboardScreen() {
         </View>
       </Modal>
 
+      {/* Edit Subscriber Modal */}
+      <Modal visible={modal === 'editSubscriber'} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>تعديل المشترك</Text>
+              <Pressable onPress={() => setModal('none')}><Feather name="x" size={22} color={Colors.text} /></Pressable>
+            </View>
+            <ScrollView contentContainerStyle={styles.modalBody}>
+              <Text style={styles.modalLabel}>الاسم</Text>
+              <TextInput style={styles.modalInput} value={editSubName} onChangeText={setEditSubName} placeholder="اسم المشترك" placeholderTextColor={Colors.textMuted} textAlign={I18nManager.isRTL ? 'right' : 'left'} />
+              <Text style={styles.modalLabel}>رقم الهاتف</Text>
+              <TextInput style={styles.modalInput} value={editSubPhone} onChangeText={setEditSubPhone} placeholder="07XXXXXXXXX" placeholderTextColor={Colors.textMuted} keyboardType="phone-pad" textAlign={I18nManager.isRTL ? 'right' : 'left'} />
+              <Text style={styles.modalLabel}>عدد الأمبيرات</Text>
+              <TextInput style={styles.modalInput} value={editSubAmperes} onChangeText={setEditSubAmperes} placeholder="مثال: 5" placeholderTextColor={Colors.textMuted} keyboardType="numeric" textAlign={I18nManager.isRTL ? 'right' : 'left'} />
+              <Text style={styles.modalLabel}>نوع الاشتراك</Text>
+              <View style={styles.tierPicker}>
+                {(['gold', 'silver', 'bronze'] as const).map((t) => (
+                  <Pressable
+                    key={t}
+                    style={[styles.tierOption, editSubTier === t && { backgroundColor: getTierBgColor(t), borderColor: getTierColor(t) }]}
+                    onPress={() => setEditSubTier(t)}
+                  >
+                    <Text style={[styles.tierOptionText, { color: getTierColor(t) }]}>{getTierLabel(t)}</Text>
+                  </Pressable>
+                ))}
+              </View>
+              <Pressable style={({ pressed }) => [styles.modalBtn, pressed && { opacity: 0.85 }]} onPress={saveEditSubscriber}>
+                <Text style={styles.modalBtnText}>حفظ التعديلات</Text>
+              </Pressable>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Set Pricing Modal */}
       <Modal visible={modal === 'setPricing'} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -409,19 +556,16 @@ export default function DashboardScreen() {
                 <Text style={styles.modalLabel}>سعر الأمبير الذهبي</Text>
               </View>
               <TextInput style={styles.modalInput} value={priceGold} onChangeText={setPriceGold} placeholder="0" placeholderTextColor={Colors.textMuted} keyboardType="numeric" textAlign={I18nManager.isRTL ? 'right' : 'left'} />
-
               <View style={styles.pricingRow}>
                 <View style={[styles.pricingDot, { backgroundColor: Colors.silver }]} />
                 <Text style={styles.modalLabel}>سعر الأمبير الليلي</Text>
               </View>
               <TextInput style={styles.modalInput} value={priceSilver} onChangeText={setPriceSilver} placeholder="0" placeholderTextColor={Colors.textMuted} keyboardType="numeric" textAlign={I18nManager.isRTL ? 'right' : 'left'} />
-
               <View style={styles.pricingRow}>
                 <View style={[styles.pricingDot, { backgroundColor: Colors.bronze }]} />
                 <Text style={styles.modalLabel}>سعر الأمبير العادي</Text>
               </View>
               <TextInput style={styles.modalInput} value={priceBronze} onChangeText={setPriceBronze} placeholder="0" placeholderTextColor={Colors.textMuted} keyboardType="numeric" textAlign={I18nManager.isRTL ? 'right' : 'left'} />
-
               <Pressable style={({ pressed }) => [styles.modalBtn, pressed && { opacity: 0.85 }]} onPress={savePricing}>
                 <Text style={styles.modalBtnText}>حفظ الأسعار</Text>
               </Pressable>
@@ -430,6 +574,7 @@ export default function DashboardScreen() {
         </View>
       </Modal>
 
+      {/* Partial Payment Modal */}
       <Modal visible={modal === 'partialPayment'} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { maxHeight: 320 }]}>
@@ -454,11 +599,12 @@ export default function DashboardScreen() {
         </View>
       </Modal>
 
+      {/* Add Expense Modal */}
       <Modal visible={modal === 'addExpense'} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { maxHeight: 380 }]}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>إضافة مصروف</Text>
+              <Text style={styles.modalTitle}>إضافة مصروف - {getMonthLabel(selectedMonth)}</Text>
               <Pressable onPress={() => setModal('none')}><Feather name="x" size={22} color={Colors.text} /></Pressable>
             </View>
             <View style={styles.modalBody}>
@@ -474,6 +620,61 @@ export default function DashboardScreen() {
         </View>
       </Modal>
 
+      {/* Expense History Modal */}
+      <Modal visible={modal === 'expenseHistory'} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>سجل المصاريف - {getMonthLabel(selectedMonth)}</Text>
+              <Pressable onPress={() => setModal('none')}><Feather name="x" size={22} color={Colors.text} /></Pressable>
+            </View>
+            <View style={styles.expenseSummaryBar}>
+              <Text style={styles.expenseSummaryLabel}>إجمالي المصاريف:</Text>
+              <Text style={styles.expenseSummaryValue}>{stats.totalExpenses.toLocaleString()}</Text>
+            </View>
+            <FlatList
+              data={monthExpenses}
+              keyExtractor={(item) => item.id}
+              contentContainerStyle={{ padding: 16 }}
+              scrollEnabled={!!monthExpenses.length}
+              ListEmptyComponent={
+                <View style={styles.emptyState}>
+                  <Feather name="inbox" size={32} color={Colors.textMuted} />
+                  <Text style={styles.emptyText}>لا توجد مصاريف مسجلة لهذا الشهر</Text>
+                </View>
+              }
+              renderItem={({ item }) => (
+                <View style={styles.expenseItem}>
+                  <View style={styles.expenseInfo}>
+                    <Text style={styles.expenseDesc}>{item.description}</Text>
+                    <View style={styles.expenseMetaRow}>
+                      <Text style={styles.expenseAmountText}>{item.amount.toLocaleString()}</Text>
+                      <Text style={styles.expenseDateText}>
+                        {item.date ? new Date(item.date).toLocaleDateString('ar-IQ') : '-'}
+                      </Text>
+                    </View>
+                  </View>
+                  <Pressable
+                    onPress={() => handleDeleteExpense(item.id)}
+                    style={({ pressed }) => [styles.cancelPayBtn, pressed && { opacity: 0.6 }]}
+                  >
+                    <Feather name="trash-2" size={16} color={Colors.error} />
+                  </Pressable>
+                </View>
+              )}
+            />
+            <Pressable
+              style={({ pressed }) => [styles.expenseAddFromHistory, pressed && { opacity: 0.85 }]}
+              onPress={() => { setModal('none'); setTimeout(openExpenseModal, 200); }}
+            >
+              <Feather name="plus" size={18} color="#fff" />
+              <Text style={styles.expenseAddBtnText}>إضافة مصروف</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Payment History Modal */}
       <Modal visible={modal === 'payments'} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -679,6 +880,54 @@ const styles = StyleSheet.create({
     fontFamily: 'Cairo_600SemiBold',
     color: Colors.primary,
   },
+  searchFilterRow: {
+    paddingHorizontal: 16,
+    marginBottom: 8,
+    gap: 8,
+  },
+  searchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.surface,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    paddingHorizontal: 12,
+    height: 42,
+    gap: 8,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 14,
+    fontFamily: 'Cairo_400Regular',
+    color: Colors.text,
+    height: '100%',
+  },
+  filterRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  filterChip: {
+    flex: 1,
+    paddingVertical: 6,
+    borderRadius: 10,
+    backgroundColor: Colors.surface,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  filterChipActive: {
+    backgroundColor: Colors.primaryFaded,
+    borderColor: Colors.primary,
+  },
+  filterChipText: {
+    fontSize: 12,
+    fontFamily: 'Cairo_600SemiBold',
+    color: Colors.textSecondary,
+  },
+  filterChipTextActive: {
+    color: Colors.primary,
+  },
   listContent: {
     paddingHorizontal: 16,
     paddingTop: 4,
@@ -701,6 +950,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     flex: 1,
+  },
+  subHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  editIconBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 8,
+    backgroundColor: Colors.surfaceSecondary,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   subName: {
     fontSize: 16,
@@ -947,5 +1209,72 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.errorLight,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  expenseSummaryBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    backgroundColor: Colors.warningLight,
+  },
+  expenseSummaryLabel: {
+    fontSize: 14,
+    fontFamily: 'Cairo_600SemiBold',
+    color: Colors.warning,
+  },
+  expenseSummaryValue: {
+    fontSize: 16,
+    fontFamily: 'Cairo_700Bold',
+    color: Colors.warning,
+  },
+  expenseItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: Colors.background,
+    borderRadius: 10,
+    padding: 14,
+    marginBottom: 8,
+  },
+  expenseInfo: {
+    flex: 1,
+  },
+  expenseDesc: {
+    fontSize: 15,
+    fontFamily: 'Cairo_600SemiBold',
+    color: Colors.text,
+    textAlign: 'right',
+  },
+  expenseMetaRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 4,
+  },
+  expenseAmountText: {
+    fontSize: 14,
+    fontFamily: 'Cairo_700Bold',
+    color: Colors.error,
+  },
+  expenseDateText: {
+    fontSize: 12,
+    fontFamily: 'Cairo_400Regular',
+    color: Colors.textMuted,
+  },
+  expenseAddFromHistory: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: Colors.primary,
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderRadius: 12,
+    height: 44,
+  },
+  expenseAddBtnText: {
+    fontSize: 14,
+    fontFamily: 'Cairo_700Bold',
+    color: '#fff',
   },
 });
