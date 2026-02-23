@@ -352,9 +352,6 @@ export default function DashboardScreen() {
             <Feather name="file-text" size={20} color={Colors.text} />
           </Pressable>
           <Pressable onPress={openExpenseModal} hitSlop={6} style={styles.topIconBtn}>
-            <Feather name="dollar-sign" size={20} color={Colors.text} />
-          </Pressable>
-          <Pressable onPress={openPricingModal} hitSlop={6} style={styles.topIconBtn}>
             <Feather name="settings" size={20} color={Colors.text} />
           </Pressable>
           <Pressable onPress={handleLogout} hitSlop={6} style={styles.topIconBtn}>
@@ -780,7 +777,7 @@ const styles = StyleSheet.create({
   },
   topBarLeft: {
     position: 'relative',
-    left: 20,
+    left: 5,
     top: -2,
     marginBottom: 5,
   },
@@ -821,7 +818,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 40,
     right: '15%',
-    left: '25%',
+    left: '35%',
     marginBottom: 5,
     width: 100,
   },
