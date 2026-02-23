@@ -449,7 +449,7 @@ export default function DashboardScreen() {
         keyExtractor={(item) => item.id}
         renderItem={renderSubscriberItem}
         contentContainerStyle={[styles.listContent, { paddingBottom: bottomPad + 80 }]}
-        style={{ marginTop: -18 }}
+        style={{ marginTop: -10 }}
         showsVerticalScrollIndicator={false}
         scrollEnabled={!!filteredSubscribers.length}
         ListEmptyComponent={
@@ -779,15 +779,22 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   topBarLeft: {
-    flex: 1,
+    position: 'relative',
+    left: 20,
+    top: -2,
+    marginBottom: 5,
   },
   topBarRight: {
     flexDirection: 'row',
     gap: 6,
+    position: 'absolute',
+    right: 10,
+    marginBottom: 5,
+    zIndex: 999,
   },
   topIconBtn: {
-    width: 38,
-    height: 38,
+    width: 30,
+    height: 30,
     borderRadius: 12,
     backgroundColor: Colors.surface,
     justifyContent: 'center',
@@ -809,23 +816,32 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    gap: 20,
+    gap: 8,
     paddingVertical: 6,
+    position: 'absolute',
+    top: 40,
+    right: '15%',
+    left: '25%',
+    marginBottom: 5,
+    width: 100,
   },
   yearText: {
-    fontSize: 16,
+    fontSize: 14,
     fontFamily: 'Cairo_700Bold',
     color: Colors.text,
   },
   monthScrollContainer: {
-    maxHeight: 44,
-    marginBottom: 5,
+    maxHeight: 80,
+    marginBottom: 3,
+    height: 50,
     flexShrink: 0,
-    height: 40,
+    zIndex: 10,
   },
   monthScroll: {
     paddingHorizontal: 16,
     gap: 6,
+    position: 'absolute',
+    top: 5,
   },
   monthChip: {
     paddingHorizontal: 14,
@@ -848,14 +864,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     paddingHorizontal: 16,
     marginBottom: 5,
-    minHeight: 75,
+    minHeight: 70,
   },
   statsContent: {
     flex: 1,
-    height: '80%',
+    height: '90%',
     paddingVertical: 4,
     marginHorizontal: 4,
     borderRadius: 12,
+    position: 'absolute',
+    top: 0,
   },
   noPricingBanner: {
     flexDirection: 'row',
@@ -882,8 +900,10 @@ const styles = StyleSheet.create({
   },
   searchFilterRow: {
     paddingHorizontal: 16,
-    marginBottom: 8,
+    marginTop: -10,
+    marginBottom: 10,
     gap: 8,
+    zIndex: 5,
   },
   searchBox: {
     flexDirection: 'row',
@@ -893,7 +913,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border,
     paddingHorizontal: 12,
-    height: 42,
+    height: 40,
     gap: 8,
   },
   searchInput: {
@@ -909,7 +929,7 @@ const styles = StyleSheet.create({
   },
   filterChip: {
     flex: 1,
-    paddingVertical: 6,
+    paddingVertical: 5,
     borderRadius: 10,
     backgroundColor: Colors.surface,
     alignItems: 'center',

@@ -67,7 +67,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } else if (nextState === 'active' && backgroundTimeRef.current) {
       const elapsed = Date.now() - backgroundTimeRef.current;
       backgroundTimeRef.current = null;
-      if (elapsed > 30000) {
+      if (elapsed > 300000) {
         logout();
       }
     }
