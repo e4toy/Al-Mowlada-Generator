@@ -186,8 +186,8 @@ export default function DashboardScreen() {
     if (remaining <= 0) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     await app.recordPayment(sub.id, selectedMonth, remaining, 'full');
-    const msg = `تم استلام دفعة كاملة بمبلغ ${remaining.toLocaleString()} من ${sub.name} بتاريخ ${new Date().toLocaleDateString('ar-IQ')}`;
-    sendWhatsApp(sub.phone, msg);
+    const msg = `تم استلام دفعة كاملة بمبلغ ${remaining.toLocaleString()} من ${sub.name} لاشتراك${sub.tier} بتاريخ ${new Date().toLocaleDateString('ar-IQ')}`;
+    sendWhatsApp(sub.phone,msg);
   }
 
   function openPartialPayment(sub: Subscriber) {
@@ -952,8 +952,11 @@ const styles = StyleSheet.create({
   subCard: {
     backgroundColor: Colors.surface,
     borderRadius: 14,
-    padding: 16,
-    marginBottom: 10,
+    padding: 1,
+    marginBottom: 3,
+    paddingVertical: 1,
+    paddingBottom: 3,
+    transform: [{ scaleY: 0.95 }],
   },
   subHeader: {
     flexDirection: 'row',
@@ -971,7 +974,7 @@ const styles = StyleSheet.create({
   subHeaderRight: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 5,
   },
   editIconBtn: {
     width: 30,
@@ -980,19 +983,22 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surfaceSecondary,
     justifyContent: 'center',
     alignItems: 'center',
+    marginTop: 17,
   },
   subName: {
-    fontSize: 16,
+    fontSize: 15,
     fontFamily: 'Cairo_700Bold',
     color: Colors.text,
+    marginTop: 17,
   },
   tierBadge: {
-    paddingHorizontal: 8,
+    paddingHorizontal: 5,
     paddingVertical: 2,
     borderRadius: 8,
+    marginTop: 17,
   },
   tierText: {
-    fontSize: 11,
+    fontSize: 13,
     fontFamily: 'Cairo_600SemiBold',
   },
   amperesBox: {
@@ -1000,12 +1006,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 3,
     backgroundColor: Colors.primaryFaded,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    height: 30,
+    paddingHorizontal: 5,
     borderRadius: 8,
+    marginTop: 17,
   },
   amperesText: {
-    fontSize: 13,
+    fontSize: 15,
     fontFamily: 'Cairo_700Bold',
     color: Colors.primary,
   },
@@ -1014,8 +1021,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-around',
     backgroundColor: Colors.background,
     borderRadius: 10,
-    paddingVertical: 10,
-    marginBottom: 12,
+    paddingVertical: 5,
+    marginBottom: 6,
   },
   finItem: {
     alignItems: 'center',
@@ -1032,21 +1039,23 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   finValue: {
-    fontSize: 15,
+    fontSize: 13,
     fontFamily: 'Cairo_700Bold',
     color: Colors.text,
   },
   subActions: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 6,
+    marginTop: -5
   },
   actionBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    paddingHorizontal: 12,
+    paddingHorizontal: 8,
     paddingVertical: 8,
     borderRadius: 10,
+    marginBottom: 3,
   },
   fullPayBtn: {
     backgroundColor: Colors.success,
@@ -1059,7 +1068,7 @@ const styles = StyleSheet.create({
     marginLeft: 'auto',
   },
   actionBtnText: {
-    fontSize: 12,
+    fontSize: 10,
     fontFamily: 'Cairo_600SemiBold',
     color: '#fff',
   },
@@ -1068,7 +1077,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
     backgroundColor: Colors.successLight,
-    paddingHorizontal: 12,
+    paddingHorizontal: 8,
     paddingVertical: 8,
     borderRadius: 10,
   },
