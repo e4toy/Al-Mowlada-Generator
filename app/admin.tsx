@@ -208,7 +208,7 @@ export default function AdminDashboardScreen() {
       />
 
       {/* Renewal Modal */}
-      <Modal visible={renewModal} animationType="slide" transparent>
+      <Modal visible={renewModal} animationType="fade" transparent>
         <View style={styles.renewOverlay}>
           <View style={styles.renewContent}>
             <View style={styles.renewHeader}>
@@ -332,7 +332,7 @@ const styles = StyleSheet.create({
   ownerCard: {
     backgroundColor: Colors.surface,
     borderRadius: 14,
-    padding: 16,
+    padding: 10,
     marginBottom: 10,
   },
   ownerHeader: {

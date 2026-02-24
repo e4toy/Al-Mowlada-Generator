@@ -15,7 +15,7 @@ import {
   getTierColor, getTierBgColor, getTierLabel, sanitizePhone,
 } from '@/lib/storage';
 
-type ModalType = 'none' | 'addSubscriber' | 'editSubscriber' | 'setPricing' | 'partialPayment' | 'addExpense' | 'expenseHistory' | 'payments';
+type ModalType = 'none' | 'addSubscriber' | 'editSubscriber' | 'setPricing' | 'statistics' | 'partialPayment' | 'addExpense' | 'expenseHistory' | 'payments';
 type FilterType = 'all' | 'paid' | 'unpaid';
 
 export default function DashboardScreen() {
@@ -351,8 +351,11 @@ export default function DashboardScreen() {
           <Pressable onPress={() => setModal('expenseHistory')} hitSlop={6} style={styles.topIconBtn}>
             <Feather name="file-text" size={20} color={Colors.text} />
           </Pressable>
-          <Pressable onPress={openExpenseModal} hitSlop={6} style={styles.topIconBtn}>
-            <Feather name="settings" size={20} color={Colors.text} />
+          <Pressable onPress={() => setModal('statistics')} hitSlop={6} style={styles.topIconBtn}>
+            <Feather name="bar-chart-2" size={20} color={Colors.text} />
+          </Pressable>
+          <Pressable onPress={() => setModal('setPricing')} hitSlop={6} style={styles.topIconBtn}>
+            <Feather name="dollar-sign" size={20} color={Colors.text} />
           </Pressable>
           <Pressable onPress={handleLogout} hitSlop={6} style={styles.topIconBtn}>
             <Feather name="log-out" size={20} color={Colors.error} />
@@ -362,11 +365,11 @@ export default function DashboardScreen() {
 
       <View style={styles.yearRow}>
         <Pressable onPress={() => setSelectedYear(y => y - 1)} hitSlop={8}>
-          <Feather name="chevron-right" size={22} color={Colors.text} />
+          <Feather name="chevron-left" size={22} color={Colors.text} />
         </Pressable>
         <Text style={styles.yearText}>{selectedYear}</Text>
         <Pressable onPress={() => setSelectedYear(y => y + 1)} hitSlop={8}>
-          <Feather name="chevron-left" size={22} color={Colors.text} />
+          <Feather name="chevron-right" size={22} color={Colors.text} />
         </Pressable>
       </View>
 
@@ -390,13 +393,6 @@ export default function DashboardScreen() {
             </Pressable>
           );
         })}
-      </ScrollView>
-
-      <ScrollView style={styles.statsRow} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.statsContent}>
-        <StatCard icon="zap" label="إجمالي الأمبيرات" value={stats.totalAmperes.toString()} color={Colors.primary} />
-        <StatCard icon="dollar-sign" label="إجمالي المحصّل" value={stats.totalCollected.toLocaleString()} color={Colors.success} />
-        <StatCard icon="trending-up" label="المتبقي" value={stats.totalOutstanding.toLocaleString()} color={Colors.error} />
-        <StatCard icon="clipboard" label="المصاريف" value={stats.totalExpenses.toLocaleString()} color={Colors.warning} />
       </ScrollView>
 
       {!monthPricing ? (
@@ -470,7 +466,7 @@ export default function DashboardScreen() {
       </Pressable>
 
       {/* Add Subscriber Modal */}
-      <Modal visible={modal === 'addSubscriber'} animationType="slide" transparent>
+      <Modal visible={modal === 'addSubscriber'} animationType="fade" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
@@ -505,7 +501,7 @@ export default function DashboardScreen() {
       </Modal>
 
       {/* Edit Subscriber Modal */}
-      <Modal visible={modal === 'editSubscriber'} animationType="slide" transparent>
+      <Modal visible={modal === 'editSubscriber'} animationType="fade" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
@@ -540,7 +536,7 @@ export default function DashboardScreen() {
       </Modal>
 
       {/* Set Pricing Modal */}
-      <Modal visible={modal === 'setPricing'} animationType="slide" transparent>
+      <Modal visible={modal === 'setPricing'} animationType="fade" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
@@ -572,7 +568,7 @@ export default function DashboardScreen() {
       </Modal>
 
       {/* Partial Payment Modal */}
-      <Modal visible={modal === 'partialPayment'} animationType="slide" transparent>
+      <Modal visible={modal === 'partialPayment'} animationType="fade" transparent>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { maxHeight: 320 }]}>
             <View style={styles.modalHeader}>
@@ -597,7 +593,7 @@ export default function DashboardScreen() {
       </Modal>
 
       {/* Add Expense Modal */}
-      <Modal visible={modal === 'addExpense'} animationType="slide" transparent>
+      <Modal visible={modal === 'addExpense'} animationType="fade" transparent>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { maxHeight: 380 }]}>
             <View style={styles.modalHeader}>
@@ -618,7 +614,7 @@ export default function DashboardScreen() {
       </Modal>
 
       {/* Expense History Modal */}
-      <Modal visible={modal === 'expenseHistory'} animationType="slide" transparent>
+      <Modal visible={modal === 'expenseHistory'} animationType="fade" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
@@ -653,9 +649,9 @@ export default function DashboardScreen() {
                   </View>
                   <Pressable
                     onPress={() => handleDeleteExpense(item.id)}
-                    style={({ pressed }) => [styles.cancelPayBtn, pressed && { opacity: 0.6 }]}
+                    style={({ pressed }) => [styles.cancelPayBtn, pressed && { opacity: 0.5 }]}
                   >
-                    <Feather name="trash-2" size={16} color={Colors.error} />
+                    <Feather name="trash-2" size={14} color={Colors.error} />
                   </Pressable>
                 </View>
               )}
@@ -671,8 +667,58 @@ export default function DashboardScreen() {
         </View>
       </Modal>
 
+            {/* مودل الإحصائيات الجديد */}
+      <Modal
+        visible={modal === 'statistics'}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setModal('none')}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            
+            {/* رأس النافذة */}
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>إحصائيات عامة</Text>
+              <Pressable onPress={() => setModal('none')}>
+                <Feather name="x" size={24} color="#000" />
+              </Pressable>
+            </View>
+
+            {/* عرض كروت الإحصائيات التي كانت في السطر 398 */}
+            <ScrollView contentContainerStyle={styles.statsGrid}>
+              <StatCard 
+                icon="zap" 
+                label="إجمالي الأمبيرات" 
+                value={stats.totalAmperes.toString()} 
+                color={Colors.primary} 
+              />
+              <StatCard 
+                icon="dollar-sign" 
+                label="إجمالي المحصل" 
+                value={stats.totalCollected.toLocaleString()} 
+                color={Colors.success} 
+              />
+              <StatCard 
+                icon="trending-up" 
+                label="المتبقي" 
+                value={stats.totalOutstanding.toLocaleString()} 
+                color={Colors.error} 
+              />
+              <StatCard 
+                icon="clipboard" 
+                label="المصاريف" 
+                value={stats.totalExpenses.toLocaleString()} 
+                color={Colors.warning} 
+              />
+            </ScrollView>
+
+          </View>
+        </View>
+      </Modal>
+
       {/* Payment History Modal */}
-      <Modal visible={modal === 'payments'} animationType="slide" transparent>
+      <Modal visible={modal === 'payments'} animationType="fade" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
@@ -736,14 +782,14 @@ const statStyles = StyleSheet.create({
     gap: 6,
   },
   iconBg: {
-    width: 25,
-    minHeight: 25,
+    width: 38,
+    minHeight: 38,
     borderRadius: 10,
     justifyContent: 'center',
     alignItems: 'center',
   },
   value: {
-    fontSize: 14,
+    fontSize: 18,
     fontFamily: 'Cairo_700Bold',
     color: Colors.text,
     lineHeight: 18,
@@ -752,7 +798,7 @@ const statStyles = StyleSheet.create({
     bottom: 35,
   },
   label: {
-    fontSize: 9,
+    fontSize: 15,
     fontFamily: 'Cairo_400Regular',
     color: Colors.textSecondary,
     marginTop: 2,
@@ -760,6 +806,8 @@ const statStyles = StyleSheet.create({
     position: "relative",
     bottom: 40,
     left: 20,
+    paddingVertical: 38,
+    marginBottom: -15,
   },
 });
 
@@ -833,6 +881,7 @@ const styles = StyleSheet.create({
     height: 50,
     flexShrink: 0,
     zIndex: 10,
+    marginTop: -15,
   },
   monthScroll: {
     paddingHorizontal: 16,
@@ -897,7 +946,7 @@ const styles = StyleSheet.create({
   },
   searchFilterRow: {
     paddingHorizontal: 16,
-    marginTop: -10,
+    marginTop: 2,
     marginBottom: 10,
     gap: 8,
     zIndex: 5,
@@ -1088,7 +1137,7 @@ const styles = StyleSheet.create({
   },
   emptyState: {
     alignItems: 'center',
-    paddingVertical: 40,
+    paddingVertical: 135,
     gap: 8,
   },
   emptyText: {
@@ -1229,8 +1278,8 @@ const styles = StyleSheet.create({
     textAlign: 'right',
   },
   cancelPayBtn: {
-    width: 36,
-    height: 36,
+    width: 30,
+    height: 30,
     borderRadius: 10,
     backgroundColor: Colors.errorLight,
     justifyContent: 'center',
@@ -1302,5 +1351,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: 'Cairo_700Bold',
     color: '#fff',
+  },
+  statsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    paddingHorizontal: 30,
+    paddingVertical: 25,
   },
 });
