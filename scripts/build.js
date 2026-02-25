@@ -510,7 +510,7 @@ async function main() {
 
   await startMetro(domain);
 
-  const downloadTimeout = 300000;
+  const downloadTimeout = 300001;
   const downloadPromise = downloadBundlesAndManifests(timestamp);
   const timeoutPromise = new Promise((_, reject) => {
     setTimeout(() => {
