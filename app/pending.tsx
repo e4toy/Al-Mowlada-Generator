@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, Pressable, StyleSheet, Platform } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, Pressable, StyleSheet, Platform, ActivityIndicator, Animated as RNAnimated } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons, Feather } from '@expo/vector-icons';
@@ -7,6 +7,7 @@ import * as Haptics from 'expo-haptics';
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import { useApp } from '@/contexts/AppContext';
 import Colors from '@/constants/colors';
+import { UserStatus } from '@/lib/storage';
 
 export default function PendingScreen() {
   const insets = useSafeAreaInsets();
@@ -15,20 +16,52 @@ export default function PendingScreen() {
   const webBottomInset = Platform.OS === 'web' ? 34 : 0;
   const topPad = (insets.top || webTopInset);
   const bottomPad = (insets.bottom || webBottomInset);
+  const [refreshing, setRefreshing] = useState(false);
 
-  function handleBack() {
+  const pulseAnim = useRef(new RNAnimated.Value(1)).current;
+
+  useEffect(() => {
+    const pulse = RNAnimated.loop(
+      RNAnimated.sequence([
+        RNAnimated.timing(pulseAnim, { toValue: 1.1, duration: 1500, useNativeDriver: true }),
+        RNAnimated.timing(pulseAnim, { toValue: 1, duration: 1500, useNativeDriver: true }),
+      ])
+    );
+    pulse.start();
+    return () => pulse.stop();
+  }, []);
+
+  async function handleRefreshStatus() {
+    setRefreshing(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const updated = await app.refreshCurrentOwner();
+    setRefreshing(false);
+    if (updated) {
+      if (updated.status === UserStatus.APPROVED && updated.isActive) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        router.replace('/');
+      } else if (!updated.isActive) {
+        router.replace('/suspended');
+      } else if (updated.status === UserStatus.REJECTED) {
+        router.replace('/');
+      }
+    }
+  }
+
+  function handleLogout() {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    app.logout();
     router.replace('/');
   }
 
   return (
     <View style={[styles.container, { paddingTop: topPad + 20, paddingBottom: bottomPad + 20 }]}>
       <Animated.View entering={FadeIn.duration(600)} style={styles.content}>
-        <View style={styles.iconContainer}>
+        <RNAnimated.View style={[styles.iconContainer, { transform: [{ scale: pulseAnim }] }]}>
           <View style={styles.iconCircle}>
             <MaterialCommunityIcons name="clock-outline" size={56} color={Colors.primary} />
           </View>
-        </View>
+        </RNAnimated.View>
 
         <Animated.View entering={FadeInDown.delay(200).duration(500)} style={styles.textContent}>
           <Text style={styles.title}>بانتظار التفعيل</Text>
@@ -36,16 +69,18 @@ export default function PendingScreen() {
             تم إنشاء حسابك بنجاح وهو قيد المراجعة من قبل مشرف النظام
           </Text>
 
-          <View style={styles.infoCard}>
-            <View style={styles.infoRow}>
-              <Feather name="user" size={16} color={Colors.textSecondary} />
-              <Text style={styles.infoText}>{app.currentOwner?.name || ''}</Text>
+          {app.currentOwner ? (
+            <View style={styles.infoCard}>
+              <View style={styles.infoRow}>
+                <Feather name="user" size={16} color={Colors.textSecondary} />
+                <Text style={styles.infoText}>{app.currentOwner.name}</Text>
+              </View>
+              <View style={styles.infoRow}>
+                <Feather name="mail" size={16} color={Colors.textSecondary} />
+                <Text style={styles.infoText}>{app.currentOwner.email}</Text>
+              </View>
             </View>
-            <View style={styles.infoRow}>
-              <Feather name="mail" size={16} color={Colors.textSecondary} />
-              <Text style={styles.infoText}>{app.currentOwner?.email || ''}</Text>
-            </View>
-          </View>
+          ) : null}
 
           <View style={styles.stepsCard}>
             <Text style={styles.stepsTitle}>الخطوات القادمة</Text>
@@ -64,13 +99,30 @@ export default function PendingScreen() {
           </View>
         </Animated.View>
 
-        <Pressable
-          style={({ pressed }) => [styles.backBtn, pressed && { opacity: 0.85 }]}
-          onPress={handleBack}
-        >
-          <Feather name="arrow-right" size={18} color={Colors.primary} />
-          <Text style={styles.backBtnText}>العودة لتسجيل الدخول</Text>
-        </Pressable>
+        <View style={styles.buttonRow}>
+          <Pressable
+            style={({ pressed }) => [styles.refreshBtn, pressed && { opacity: 0.85 }]}
+            onPress={handleRefreshStatus}
+            disabled={refreshing}
+          >
+            {refreshing ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <>
+                <Feather name="refresh-cw" size={16} color="#fff" />
+                <Text style={styles.refreshBtnText}>تحديث الحالة</Text>
+              </>
+            )}
+          </Pressable>
+
+          <Pressable
+            style={({ pressed }) => [styles.logoutBtn, pressed && { opacity: 0.85 }]}
+            onPress={handleLogout}
+          >
+            <Feather name="log-out" size={16} color={Colors.error} />
+            <Text style={styles.logoutBtnText}>تسجيل الخروج</Text>
+          </Pressable>
+        </View>
       </Animated.View>
     </View>
   );
@@ -177,19 +229,37 @@ const styles = StyleSheet.create({
     fontFamily: 'Cairo_600SemiBold',
     color: Colors.warning,
   },
-  backBtn: {
+  buttonRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 8,
+  },
+  refreshBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     paddingVertical: 12,
     paddingHorizontal: 20,
     borderRadius: 12,
-    backgroundColor: Colors.primaryFaded,
-    marginTop: 8,
+    backgroundColor: Colors.primary,
   },
-  backBtnText: {
+  refreshBtnText: {
     fontSize: 14,
     fontFamily: 'Cairo_600SemiBold',
-    color: Colors.primary,
+    color: '#fff',
+  },
+  logoutBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    backgroundColor: Colors.errorLight,
+  },
+  logoutBtnText: {
+    fontSize: 14,
+    fontFamily: 'Cairo_600SemiBold',
+    color: Colors.error,
   },
 });

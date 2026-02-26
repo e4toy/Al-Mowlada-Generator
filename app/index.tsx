@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, TextInput, Pressable, StyleSheet, ActivityIndicator,
-  Platform, Alert, I18nManager,
+  Platform, I18nManager,
 } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -11,10 +11,11 @@ import Animated, { FadeInDown, FadeIn } from 'react-native-reanimated';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
 import { useApp } from '@/contexts/AppContext';
 import Colors from '@/constants/colors';
+import { UserStatus } from '@/lib/storage';
 
 export default function LoginScreen() {
   const insets = useSafeAreaInsets();
-  const { session, loading, login } = useApp();
+  const { session, loading, currentOwner, login } = useApp();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -25,14 +26,26 @@ export default function LoginScreen() {
   const webBottomInset = Platform.OS === 'web' ? 34 : 0;
 
   useEffect(() => {
-    if (!loading && session) {
+    if (loading) return;
+    if (session) {
       if (session.type === 'owner') {
         router.replace('/dashboard');
       } else if (session.type === 'admin') {
         router.replace('/admin');
       }
+      return;
     }
-  }, [loading, session]);
+    if (currentOwner) {
+      if (currentOwner.status === UserStatus.PENDING) {
+        router.replace('/pending');
+        return;
+      }
+      if (!currentOwner.isActive) {
+        router.replace('/suspended');
+        return;
+      }
+    }
+  }, [loading, session, currentOwner]);
 
   if (loading) {
     return (
@@ -59,6 +72,8 @@ export default function LoginScreen() {
       router.replace('/dashboard');
     } else if (result.pending) {
       router.replace('/pending');
+    } else if (result.suspended) {
+      router.replace('/suspended');
     } else {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       setError(result.message);

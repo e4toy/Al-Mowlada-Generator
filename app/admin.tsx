@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import {
-  View, Text, Pressable, StyleSheet, SectionList, Modal,
-  Platform,
+  View, Text, Pressable, StyleSheet, SectionList, Modal, Switch,
+  Platform, Alert,
 } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -10,7 +10,20 @@ import * as Haptics from 'expo-haptics';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useApp } from '@/contexts/AppContext';
 import Colors from '@/constants/colors';
-import { Owner, isOwnerExpired, getDaysRemaining, getOwnerExpiryDate } from '@/lib/storage';
+import { Owner, UserStatus, isOwnerExpired, getDaysRemaining, getOwnerExpiryDate } from '@/lib/storage';
+
+function confirmAction(title: string, message: string, onConfirm: () => void) {
+  if (Platform.OS === 'web') {
+    if (confirm(`${title}\n${message}`)) {
+      onConfirm();
+    }
+  } else {
+    Alert.alert(title, message, [
+      { text: 'إلغاء', style: 'cancel' },
+      { text: 'تأكيد', style: 'destructive', onPress: onConfirm },
+    ]);
+  }
+}
 
 export default function AdminDashboardScreen() {
   const insets = useSafeAreaInsets();
@@ -23,18 +36,28 @@ export default function AdminDashboardScreen() {
   const [renewTarget, setRenewTarget] = useState<Owner | null>(null);
 
   const sections = useMemo(() => {
-    const pending = app.owners.filter(o => o.status === 'pending');
-    const active = app.owners.filter(o => o.status === 'approved' && !isOwnerExpired(o));
-    const expired = app.owners.filter(o => o.status === 'approved' && isOwnerExpired(o));
-    const rejected = app.owners.filter(o => o.status === 'rejected');
+    const pending = app.owners.filter(o => o.status === UserStatus.PENDING);
+    const active = app.owners.filter(o => o.status === UserStatus.APPROVED && o.isActive && !isOwnerExpired(o));
+    const suspended = app.owners.filter(o => o.status === UserStatus.APPROVED && !o.isActive);
+    const expired = app.owners.filter(o => o.status === UserStatus.APPROVED && o.isActive && isOwnerExpired(o));
+    const rejected = app.owners.filter(o => o.status === UserStatus.REJECTED);
 
     const result: { title: string; data: Owner[]; type: string }[] = [];
     if (pending.length > 0) result.push({ title: 'طلبات الانتظار', data: pending, type: 'pending' });
     if (active.length > 0) result.push({ title: 'الحسابات النشطة', data: active, type: 'active' });
+    if (suspended.length > 0) result.push({ title: 'الحسابات المعطلة', data: suspended, type: 'suspended' });
     if (expired.length > 0) result.push({ title: 'حسابات منتهية الصلاحية', data: expired, type: 'expired' });
     if (rejected.length > 0) result.push({ title: 'الحسابات المرفوضة', data: rejected, type: 'rejected' });
     return result;
   }, [app.owners]);
+
+  const statCounts = useMemo(() => ({
+    pending: app.owners.filter(o => o.status === UserStatus.PENDING).length,
+    active: app.owners.filter(o => o.status === UserStatus.APPROVED && o.isActive && !isOwnerExpired(o)).length,
+    suspended: app.owners.filter(o => o.status === UserStatus.APPROVED && !o.isActive).length,
+    expired: app.owners.filter(o => o.status === UserStatus.APPROVED && o.isActive && isOwnerExpired(o)).length,
+    total: app.owners.length,
+  }), [app.owners]);
 
   function handleLogout() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -42,19 +65,52 @@ export default function AdminDashboardScreen() {
     router.replace('/');
   }
 
-  async function handleApprove(ownerId: string) {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    await app.approveOwner(ownerId);
+  function handleApprove(ownerId: string) {
+    const owner = app.owners.find(o => o.id === ownerId);
+    confirmAction(
+      'تأكيد القبول',
+      `هل أنت متأكد من قبول "${owner?.name}"؟`,
+      async () => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        await app.approveOwner(ownerId);
+      }
+    );
   }
 
-  async function handleReject(ownerId: string) {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    await app.rejectOwner(ownerId);
+  function handleReject(ownerId: string) {
+    const owner = app.owners.find(o => o.id === ownerId);
+    confirmAction(
+      'تأكيد الرفض',
+      `هل أنت متأكد من رفض "${owner?.name}"؟`,
+      async () => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        await app.rejectOwner(ownerId);
+      }
+    );
   }
 
-  async function handleDelete(ownerId: string) {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-    await app.deleteOwner(ownerId);
+  function handleDelete(ownerId: string) {
+    const owner = app.owners.find(o => o.id === ownerId);
+    confirmAction(
+      'تأكيد الحذف',
+      `هل أنت متأكد من حذف "${owner?.name}" نهائياً؟ لا يمكن التراجع عن هذا الإجراء.`,
+      async () => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+        await app.deleteOwner(ownerId);
+      }
+    );
+  }
+
+  function handleToggleActive(owner: Owner) {
+    const action = owner.isActive ? 'تعطيل' : 'تفعيل';
+    confirmAction(
+      `تأكيد ${action} الحساب`,
+      `هل أنت متأكد من ${action} حساب "${owner.name}"؟`,
+      async () => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        await app.toggleOwnerActive(owner.id);
+      }
+    );
   }
 
   function openRenewModal(owner: Owner) {
@@ -90,6 +146,12 @@ export default function AdminDashboardScreen() {
               <Text style={styles.daysLeftText}>{daysLeft} يوم</Text>
             </View>
           ) : null}
+          {sectionType === 'suspended' ? (
+            <View style={styles.suspendedBadge}>
+              <Feather name="lock" size={12} color={Colors.error} />
+              <Text style={styles.suspendedBadgeText}>معطل</Text>
+            </View>
+          ) : null}
         </View>
 
         <View style={styles.ownerMeta}>
@@ -98,12 +160,26 @@ export default function AdminDashboardScreen() {
             تاريخ التسجيل: {new Date(item.createdAt).toLocaleDateString('ar-IQ')}
           </Text>
         </View>
-        {expiryDate && (sectionType === 'active' || sectionType === 'expired') ? (
+        {expiryDate && (sectionType === 'active' || sectionType === 'expired' || sectionType === 'suspended') ? (
           <View style={styles.ownerMeta}>
             <Feather name="clock" size={13} color={sectionType === 'expired' ? Colors.error : Colors.textMuted} />
             <Text style={[styles.metaText, sectionType === 'expired' && { color: Colors.error }]}>
               تاريخ الانتهاء: {expiryDate.toLocaleDateString('ar-IQ')}
             </Text>
+          </View>
+        ) : null}
+
+        {(sectionType === 'active' || sectionType === 'suspended' || sectionType === 'expired') ? (
+          <View style={styles.toggleRow}>
+            <Text style={styles.toggleLabel}>
+              {item.isActive ? 'الحساب نشط' : 'الحساب معطل'}
+            </Text>
+            <Switch
+              value={item.isActive}
+              onValueChange={() => handleToggleActive(item)}
+              trackColor={{ false: Colors.errorLight, true: Colors.successLight }}
+              thumbColor={item.isActive ? Colors.success : Colors.error}
+            />
           </View>
         ) : null}
 
@@ -126,7 +202,7 @@ export default function AdminDashboardScreen() {
               </Pressable>
             </>
           ) : null}
-          {sectionType === 'active' || sectionType === 'expired' ? (
+          {sectionType === 'active' || sectionType === 'expired' || sectionType === 'suspended' ? (
             <Pressable
               style={({ pressed }) => [styles.adminActionBtn, styles.renewBtn, pressed && { opacity: 0.7 }]}
               onPress={() => openRenewModal(item)}
@@ -144,7 +220,7 @@ export default function AdminDashboardScreen() {
         </View>
       </Animated.View>
     );
-  }, []);
+  }, [app.owners]);
 
   const renewOptions = [
     { months: 1, label: 'شهر واحد', sublabel: '30 يوم' },
@@ -169,22 +245,27 @@ export default function AdminDashboardScreen() {
 
       <View style={styles.statsBar}>
         <View style={styles.miniStat}>
-          <Text style={styles.miniStatValue}>{app.owners.filter(o => o.status === 'pending').length}</Text>
+          <Text style={styles.miniStatValue}>{statCounts.pending}</Text>
           <Text style={styles.miniStatLabel}>قيد الانتظار</Text>
         </View>
         <View style={styles.miniStatDivider} />
         <View style={styles.miniStat}>
-          <Text style={styles.miniStatValue}>{app.owners.filter(o => o.status === 'approved' && !isOwnerExpired(o)).length}</Text>
+          <Text style={styles.miniStatValue}>{statCounts.active}</Text>
           <Text style={styles.miniStatLabel}>نشط</Text>
         </View>
         <View style={styles.miniStatDivider} />
         <View style={styles.miniStat}>
-          <Text style={styles.miniStatValue}>{app.owners.filter(o => o.status === 'approved' && isOwnerExpired(o)).length}</Text>
+          <Text style={[styles.miniStatValue, { color: Colors.error }]}>{statCounts.suspended}</Text>
+          <Text style={styles.miniStatLabel}>معطل</Text>
+        </View>
+        <View style={styles.miniStatDivider} />
+        <View style={styles.miniStat}>
+          <Text style={styles.miniStatValue}>{statCounts.expired}</Text>
           <Text style={styles.miniStatLabel}>منتهي</Text>
         </View>
         <View style={styles.miniStatDivider} />
         <View style={styles.miniStat}>
-          <Text style={styles.miniStatValue}>{app.owners.length}</Text>
+          <Text style={styles.miniStatValue}>{statCounts.total}</Text>
           <Text style={styles.miniStatLabel}>الإجمالي</Text>
         </View>
       </View>
@@ -207,7 +288,6 @@ export default function AdminDashboardScreen() {
         }
       />
 
-      {/* Renewal Modal */}
       <Modal visible={renewModal} animationType="fade" transparent>
         <View style={styles.renewOverlay}>
           <View style={styles.renewContent}>
@@ -381,6 +461,20 @@ const styles = StyleSheet.create({
     fontFamily: 'Cairo_600SemiBold',
     color: Colors.success,
   },
+  suspendedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: Colors.errorLight,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  suspendedBadgeText: {
+    fontSize: 12,
+    fontFamily: 'Cairo_600SemiBold',
+    color: Colors.error,
+  },
   ownerMeta: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -391,6 +485,21 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: 'Cairo_400Regular',
     color: Colors.textMuted,
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: Colors.background,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    marginBottom: 8,
+  },
+  toggleLabel: {
+    fontSize: 14,
+    fontFamily: 'Cairo_600SemiBold',
+    color: Colors.text,
   },
   ownerActions: {
     flexDirection: 'row',

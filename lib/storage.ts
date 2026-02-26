@@ -3,11 +3,18 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const KEYS = {
   OWNERS: '@almowlada_owners',
   SESSION: '@almowlada_session',
+  PENDING_SYNC: '@almowlada_pending_sync',
   subscribers: (ownerId: string) => `@almowlada_subs_${ownerId}`,
   pricing: (ownerId: string) => `@almowlada_pricing_${ownerId}`,
   payments: (ownerId: string) => `@almowlada_payments_${ownerId}`,
   expenses: (ownerId: string) => `@almowlada_expenses_${ownerId}`,
 };
+
+export enum UserStatus {
+  PENDING = 'pending',
+  APPROVED = 'approved',
+  REJECTED = 'rejected',
+}
 
 export interface Owner {
   id: string;
@@ -15,10 +22,12 @@ export interface Owner {
   phone: string;
   email: string;
   password: string;
-  status: 'pending' | 'approved' | 'rejected';
+  status: UserStatus;
+  isActive: boolean;
   activatedAt: string | null;
   expiryDate: string | null;
   createdAt: string;
+  updatedAt: string;
 }
 
 export interface Subscriber {
@@ -28,6 +37,7 @@ export interface Subscriber {
   amperes: number;
   tier: 'gold' | 'silver' | 'bronze';
   createdMonth: string;
+  updatedAt?: string;
 }
 
 export interface MonthlyPricing {
@@ -43,6 +53,7 @@ export interface Payment {
   amount: number;
   date: string;
   type: 'full' | 'partial';
+  updatedAt?: string;
 }
 
 export interface Expense {
@@ -51,6 +62,15 @@ export interface Expense {
   description: string;
   amount: number;
   date: string;
+  updatedAt?: string;
+}
+
+export interface SyncAction {
+  id: string;
+  type: 'add' | 'update' | 'delete';
+  entity: 'subscriber' | 'payment' | 'expense' | 'pricing';
+  data: unknown;
+  timestamp: string;
 }
 
 export type Session = { type: 'owner'; ownerId: string } | { type: 'admin' } | null;
@@ -68,9 +88,19 @@ async function setJSON(key: string, value: unknown): Promise<void> {
   await AsyncStorage.setItem(key, JSON.stringify(value));
 }
 
+function migrateOwner(o: any): Owner {
+  return {
+    ...o,
+    status: o.status || UserStatus.PENDING,
+    isActive: o.isActive !== undefined ? o.isActive : true,
+    updatedAt: o.updatedAt || o.createdAt || new Date().toISOString(),
+  };
+}
+
 export const Storage = {
   async getOwners(): Promise<Owner[]> {
-    return getJSON(KEYS.OWNERS, []);
+    const raw = await getJSON<any[]>(KEYS.OWNERS, []);
+    return raw.map(migrateOwner);
   },
   async saveOwners(owners: Owner[]): Promise<void> {
     await setJSON(KEYS.OWNERS, owners);
@@ -108,6 +138,20 @@ export const Storage = {
   },
   async saveExpenses(ownerId: string, expenses: Expense[]): Promise<void> {
     await setJSON(KEYS.expenses(ownerId), expenses);
+  },
+  async getPendingSync(): Promise<SyncAction[]> {
+    return getJSON(KEYS.PENDING_SYNC, []);
+  },
+  async savePendingSync(actions: SyncAction[]): Promise<void> {
+    await setJSON(KEYS.PENDING_SYNC, actions);
+  },
+  async addSyncAction(action: SyncAction): Promise<void> {
+    const existing = await this.getPendingSync();
+    existing.push(action);
+    await this.savePendingSync(existing);
+  },
+  async clearSyncActions(): Promise<void> {
+    await AsyncStorage.removeItem(KEYS.PENDING_SYNC);
   },
 };
 

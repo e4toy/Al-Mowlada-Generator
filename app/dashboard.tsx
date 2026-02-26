@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import {
   View, Text, Pressable, StyleSheet, FlatList, Modal, TextInput,
-  Platform, Linking, ScrollView, I18nManager,
+  Platform, Linking, ScrollView, I18nManager, Alert,
 } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -17,6 +17,19 @@ import {
 
 type ModalType = 'none' | 'addSubscriber' | 'editSubscriber' | 'setPricing' | 'statistics' | 'partialPayment' | 'addExpense' | 'expenseHistory' | 'payments';
 type FilterType = 'all' | 'paid' | 'unpaid';
+
+function confirmAction(title: string, message: string, onConfirm: () => void) {
+  if (Platform.OS === 'web') {
+    if (confirm(`${title}\n${message}`)) {
+      onConfirm();
+    }
+  } else {
+    Alert.alert(title, message, [
+      { text: 'إلغاء', style: 'cancel' },
+      { text: 'تأكيد', style: 'destructive', onPress: onConfirm },
+    ]);
+  }
+}
 
 export default function DashboardScreen() {
   const insets = useSafeAreaInsets();
@@ -179,15 +192,32 @@ export default function DashboardScreen() {
     setModal('none');
   }
 
+  function handleDeleteSubscriber(sub: Subscriber) {
+    confirmAction(
+      'حذف المشترك',
+      `هل أنت متأكد من حذف "${sub.name}" نهائياً؟ سيتم حذف جميع سجلات الدفع المرتبطة به في كل الأشهر.`,
+      async () => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+        await app.deleteSubscriber(sub.id);
+      }
+    );
+  }
+
   async function handleFullPayment(sub: Subscriber) {
     const due = app.getSubscriberDue(sub, selectedMonth);
     const paid = app.getSubscriberPaid(sub.id, selectedMonth);
     const remaining = due - paid;
     if (remaining <= 0) return;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    await app.recordPayment(sub.id, selectedMonth, remaining, 'full');
-    const msg = `تم استلام دفعة كاملة بمبلغ ${remaining.toLocaleString()} من ${sub.name} لاشتراك${sub.tier} بتاريخ ${new Date().toLocaleDateString('ar-IQ')}`;
-    sendWhatsApp(sub.phone,msg);
+    confirmAction(
+      'تأكيد الدفع الكامل',
+      `تسجيل دفع كامل بمبلغ ${remaining.toLocaleString()} من ${sub.name}؟`,
+      async () => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        await app.recordPayment(sub.id, selectedMonth, remaining, 'full');
+        const msg = `تم استلام دفعة كاملة بمبلغ ${remaining.toLocaleString()} من ${sub.name} لاشتراك ${getTierLabel(sub.tier)} بتاريخ ${new Date().toLocaleDateString('ar-IQ')}`;
+        sendWhatsApp(sub.phone, msg);
+      }
+    );
   }
 
   function openPartialPayment(sub: Subscriber) {
@@ -215,9 +245,15 @@ export default function DashboardScreen() {
     setModal('payments');
   }
 
-  async function handleCancelPayment(paymentId: string) {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    await app.cancelPayment(paymentId);
+  function handleCancelPayment(paymentId: string) {
+    confirmAction(
+      'إلغاء الدفعة',
+      'هل أنت متأكد من إلغاء هذه الدفعة؟',
+      async () => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        await app.cancelPayment(paymentId);
+      }
+    );
   }
 
   function sendWhatsApp(phone: string, message: string) {
@@ -242,9 +278,15 @@ export default function DashboardScreen() {
     setModal('none');
   }
 
-  async function handleDeleteExpense(id: string) {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    await app.deleteExpense(id);
+  function handleDeleteExpense(id: string) {
+    confirmAction(
+      'حذف المصروف',
+      'هل أنت متأكد من حذف هذا المصروف؟',
+      async () => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        await app.deleteExpense(id);
+      }
+    );
   }
 
   function handleLogout() {
@@ -282,6 +324,13 @@ export default function DashboardScreen() {
               style={({ pressed }) => [styles.editIconBtn, pressed && { opacity: 0.6 }]}
             >
               <Feather name="edit-2" size={14} color={Colors.textSecondary} />
+            </Pressable>
+            <Pressable
+              onPress={() => handleDeleteSubscriber(item)}
+              hitSlop={6}
+              style={({ pressed }) => [styles.deleteIconBtn, pressed && { opacity: 0.6 }]}
+            >
+              <Feather name="trash-2" size={14} color={Colors.error} />
             </Pressable>
           </View>
         </View>
@@ -342,6 +391,13 @@ export default function DashboardScreen() {
 
   return (
     <View style={[styles.container, { paddingTop: topPad }]}>
+      {!app.isOnline ? (
+        <View style={styles.offlineBanner}>
+          <Feather name="wifi-off" size={14} color="#fff" />
+          <Text style={styles.offlineBannerText}>وضع عدم الاتصال - البيانات محفوظة محلياً</Text>
+        </View>
+      ) : null}
+
       <View style={styles.topBar}>
         <View style={styles.topBarLeft}>
           <Text style={styles.ownerName}>{app.currentOwner?.name || ''}</Text>
@@ -465,7 +521,6 @@ export default function DashboardScreen() {
         <Feather name="plus" size={24} color="#fff" />
       </Pressable>
 
-      {/* Add Subscriber Modal */}
       <Modal visible={modal === 'addSubscriber'} animationType="fade" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -500,7 +555,6 @@ export default function DashboardScreen() {
         </View>
       </Modal>
 
-      {/* Edit Subscriber Modal */}
       <Modal visible={modal === 'editSubscriber'} animationType="fade" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -535,7 +589,6 @@ export default function DashboardScreen() {
         </View>
       </Modal>
 
-      {/* Set Pricing Modal */}
       <Modal visible={modal === 'setPricing'} animationType="fade" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -567,7 +620,6 @@ export default function DashboardScreen() {
         </View>
       </Modal>
 
-      {/* Partial Payment Modal */}
       <Modal visible={modal === 'partialPayment'} animationType="fade" transparent>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { maxHeight: 320 }]}>
@@ -592,7 +644,6 @@ export default function DashboardScreen() {
         </View>
       </Modal>
 
-      {/* Add Expense Modal */}
       <Modal visible={modal === 'addExpense'} animationType="fade" transparent>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { maxHeight: 380 }]}>
@@ -613,7 +664,6 @@ export default function DashboardScreen() {
         </View>
       </Modal>
 
-      {/* Expense History Modal */}
       <Modal visible={modal === 'expenseHistory'} animationType="fade" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -667,7 +717,6 @@ export default function DashboardScreen() {
         </View>
       </Modal>
 
-            {/* مودل الإحصائيات الجديد */}
       <Modal
         visible={modal === 'statistics'}
         transparent={true}
@@ -676,48 +725,22 @@ export default function DashboardScreen() {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            
-            {/* رأس النافذة */}
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>إحصائيات عامة</Text>
               <Pressable onPress={() => setModal('none')}>
                 <Feather name="x" size={24} color="#000" />
               </Pressable>
             </View>
-
-            {/* عرض كروت الإحصائيات التي كانت في السطر 398 */}
             <ScrollView contentContainerStyle={styles.statsGrid}>
-              <StatCard 
-                icon="zap" 
-                label="إجمالي الأمبيرات" 
-                value={stats.totalAmperes.toString()} 
-                color={Colors.primary} 
-              />
-              <StatCard 
-                icon="dollar-sign" 
-                label="إجمالي المحصل" 
-                value={stats.totalCollected.toLocaleString()} 
-                color={Colors.success} 
-              />
-              <StatCard 
-                icon="trending-up" 
-                label="المتبقي" 
-                value={stats.totalOutstanding.toLocaleString()} 
-                color={Colors.error} 
-              />
-              <StatCard 
-                icon="clipboard" 
-                label="المصاريف" 
-                value={stats.totalExpenses.toLocaleString()} 
-                color={Colors.warning} 
-              />
+              <StatCard icon="zap" label="إجمالي الأمبيرات" value={stats.totalAmperes.toString()} color={Colors.primary} />
+              <StatCard icon="dollar-sign" label="إجمالي المحصل" value={stats.totalCollected.toLocaleString()} color={Colors.success} />
+              <StatCard icon="trending-up" label="المتبقي" value={stats.totalOutstanding.toLocaleString()} color={Colors.error} />
+              <StatCard icon="clipboard" label="المصاريف" value={stats.totalExpenses.toLocaleString()} color={Colors.warning} />
             </ScrollView>
-
           </View>
         </View>
       </Modal>
 
-      {/* Payment History Modal */}
       <Modal visible={modal === 'payments'} animationType="fade" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -815,6 +838,20 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: Colors.background,
+  },
+  offlineBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: Colors.warning,
+    paddingVertical: 6,
+    paddingHorizontal: 16,
+  },
+  offlineBannerText: {
+    fontSize: 12,
+    fontFamily: 'Cairo_600SemiBold',
+    color: '#fff',
   },
   topBar: {
     flexDirection: 'row',
@@ -920,6 +957,13 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     position: 'absolute',
     top: 0,
+  },
+  statsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    padding: 16,
+    gap: 10,
+    justifyContent: 'center',
   },
   noPricingBanner: {
     flexDirection: 'row',
@@ -1034,6 +1078,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: 17,
   },
+  deleteIconBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 8,
+    backgroundColor: Colors.errorLight,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 17,
+  },
   subName: {
     fontSize: 15,
     fontFamily: 'Cairo_700Bold',
@@ -1095,7 +1148,7 @@ const styles = StyleSheet.create({
   subActions: {
     flexDirection: 'row',
     gap: 6,
-    marginTop: -5
+    marginTop: -5,
   },
   actionBtn: {
     flexDirection: 'row',
@@ -1351,12 +1404,5 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: 'Cairo_700Bold',
     color: '#fff',
-  },
-  statsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    paddingHorizontal: 30,
-    paddingVertical: 25,
   },
 });
