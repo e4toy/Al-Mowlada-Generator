@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import {
   View, Text, Pressable, StyleSheet, SectionList, Modal, Switch,
-  Platform, Alert,
+  Platform,
 } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -9,25 +9,14 @@ import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useApp } from '@/contexts/AppContext';
+import { useAlert } from '@/components/CustomAlert';
 import Colors from '@/constants/colors';
 import { Owner, UserStatus, isOwnerExpired, getDaysRemaining, getOwnerExpiryDate } from '@/lib/storage';
-
-function confirmAction(title: string, message: string, onConfirm: () => void) {
-  if (Platform.OS === 'web') {
-    if (confirm(`${title}\n${message}`)) {
-      onConfirm();
-    }
-  } else {
-    Alert.alert(title, message, [
-      { text: 'إلغاء', style: 'cancel' },
-      { text: 'تأكيد', style: 'destructive', onPress: onConfirm },
-    ]);
-  }
-}
 
 export default function AdminDashboardScreen() {
   const insets = useSafeAreaInsets();
   const app = useApp();
+  const { showAlert } = useAlert();
   const webTopInset = Platform.OS === 'web' ? 67 : 0;
   const webBottomInset = Platform.OS === 'web' ? 34 : 0;
   const topPad = (insets.top || webTopInset);
@@ -67,50 +56,71 @@ export default function AdminDashboardScreen() {
 
   function handleApprove(ownerId: string) {
     const owner = app.owners.find(o => o.id === ownerId);
-    confirmAction(
-      'تأكيد القبول',
-      `هل أنت متأكد من قبول "${owner?.name}"؟`,
-      async () => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-        await app.approveOwner(ownerId);
-      }
-    );
+    showAlert({
+      type: 'confirm',
+      title: 'تأكيد القبول',
+      message: `هل أنت متأكد من قبول "${owner?.name}"؟`,
+      icon: 'user-check',
+      buttons: [
+        { text: 'إلغاء', style: 'cancel' },
+        { text: 'قبول', style: 'destructive', onPress: async () => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          await app.approveOwner(ownerId);
+        }},
+      ],
+    });
   }
 
   function handleReject(ownerId: string) {
     const owner = app.owners.find(o => o.id === ownerId);
-    confirmAction(
-      'تأكيد الرفض',
-      `هل أنت متأكد من رفض "${owner?.name}"؟`,
-      async () => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-        await app.rejectOwner(ownerId);
-      }
-    );
+    showAlert({
+      type: 'confirm',
+      title: 'تأكيد الرفض',
+      message: `هل أنت متأكد من رفض "${owner?.name}"؟`,
+      icon: 'user-x',
+      buttons: [
+        { text: 'إلغاء', style: 'cancel' },
+        { text: 'رفض', style: 'destructive', onPress: async () => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          await app.rejectOwner(ownerId);
+        }},
+      ],
+    });
   }
 
   function handleDelete(ownerId: string) {
     const owner = app.owners.find(o => o.id === ownerId);
-    confirmAction(
-      'تأكيد الحذف',
-      `هل أنت متأكد من حذف "${owner?.name}" نهائياً؟ لا يمكن التراجع عن هذا الإجراء.`,
-      async () => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-        await app.deleteOwner(ownerId);
-      }
-    );
+    showAlert({
+      type: 'confirm',
+      title: 'تأكيد الحذف',
+      message: `هل أنت متأكد من حذف "${owner?.name}" نهائياً؟ لا يمكن التراجع عن هذا الإجراء.`,
+      icon: 'trash-2',
+      buttons: [
+        { text: 'إلغاء', style: 'cancel' },
+        { text: 'حذف', style: 'destructive', onPress: async () => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+          await app.deleteOwner(ownerId);
+        }},
+      ],
+    });
   }
 
   function handleToggleActive(owner: Owner) {
     const action = owner.isActive ? 'تعطيل' : 'تفعيل';
-    confirmAction(
-      `تأكيد ${action} الحساب`,
-      `هل أنت متأكد من ${action} حساب "${owner.name}"؟`,
-      async () => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-        await app.toggleOwnerActive(owner.id);
-      }
-    );
+    const icon = owner.isActive ? 'lock' : 'unlock';
+    showAlert({
+      type: 'confirm',
+      title: `تأكيد ${action} الحساب`,
+      message: `هل أنت متأكد من ${action} حساب "${owner.name}"؟`,
+      icon: icon as any,
+      buttons: [
+        { text: 'إلغاء', style: 'cancel' },
+        { text: action, style: 'destructive', onPress: async () => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          await app.toggleOwnerActive(owner.id);
+        }},
+      ],
+    });
   }
 
   function openRenewModal(owner: Owner) {

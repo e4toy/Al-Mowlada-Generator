@@ -17,7 +17,7 @@ A comprehensive Arabic RTL subscription management app for generator services bu
 - Multi-month account renewal (1/3/6 months)
 - Account suspension controls (admin toggle switch)
 - Offline mode with NetInfo connectivity detection
-- Comprehensive confirmation dialogs for all destructive actions
+- Custom premium modals (AlertProvider) replacing all native alerts/confirms
 - Deep delete (subscribers + all associated payments)
 - Pending activation screen with pulsing animation and refresh status
 
@@ -28,6 +28,7 @@ A comprehensive Arabic RTL subscription management app for generator services bu
 
 ## File Structure
 - `app/` - Expo Router screens (index, signup, admin-login, pending, suspended, dashboard, admin)
+- `components/CustomAlert.tsx` - Premium custom modal system (AlertProvider + useAlert)
 - `lib/storage.ts` - Data models, AsyncStorage helpers, utilities
 - `contexts/AppContext.tsx` - Global state management with NetInfo
 - `constants/colors.ts` - Theme colors

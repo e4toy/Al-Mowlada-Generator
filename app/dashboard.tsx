@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import {
   View, Text, Pressable, StyleSheet, FlatList, Modal, TextInput,
-  Platform, Linking, ScrollView, I18nManager, Alert,
+  Platform, Linking, ScrollView, I18nManager,
 } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -9,6 +9,7 @@ import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useApp } from '@/contexts/AppContext';
+import { useAlert } from '@/components/CustomAlert';
 import Colors from '@/constants/colors';
 import {
   Subscriber, Payment, Expense, getMonthKey, getMonthLabel,
@@ -18,22 +19,10 @@ import {
 type ModalType = 'none' | 'addSubscriber' | 'editSubscriber' | 'setPricing' | 'statistics' | 'partialPayment' | 'addExpense' | 'expenseHistory' | 'payments';
 type FilterType = 'all' | 'paid' | 'unpaid';
 
-function confirmAction(title: string, message: string, onConfirm: () => void) {
-  if (Platform.OS === 'web') {
-    if (confirm(`${title}\n${message}`)) {
-      onConfirm();
-    }
-  } else {
-    Alert.alert(title, message, [
-      { text: 'إلغاء', style: 'cancel' },
-      { text: 'تأكيد', style: 'destructive', onPress: onConfirm },
-    ]);
-  }
-}
-
 export default function DashboardScreen() {
   const insets = useSafeAreaInsets();
   const app = useApp();
+  const { showConfirm, showAlert } = useAlert();
   const webTopInset = Platform.OS === 'web' ? 67 : 0;
   const webBottomInset = Platform.OS === 'web' ? 34 : 0;
   const topPad = (insets.top || webTopInset);
@@ -193,14 +182,19 @@ export default function DashboardScreen() {
   }
 
   function handleDeleteSubscriber(sub: Subscriber) {
-    confirmAction(
-      'حذف المشترك',
-      `هل أنت متأكد من حذف "${sub.name}" نهائياً؟ سيتم حذف جميع سجلات الدفع المرتبطة به في كل الأشهر.`,
-      async () => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-        await app.deleteSubscriber(sub.id);
-      }
-    );
+    showAlert({
+      type: 'confirm',
+      title: 'حذف المشترك',
+      message: `هل أنت متأكد من حذف "${sub.name}" نهائياً؟ سيتم حذف جميع سجلات الدفع المرتبطة به في كل الأشهر.`,
+      icon: 'trash-2',
+      buttons: [
+        { text: 'إلغاء', style: 'cancel' },
+        { text: 'حذف', style: 'destructive', onPress: async () => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+          await app.deleteSubscriber(sub.id);
+        }},
+      ],
+    });
   }
 
   async function handleFullPayment(sub: Subscriber) {
@@ -208,16 +202,21 @@ export default function DashboardScreen() {
     const paid = app.getSubscriberPaid(sub.id, selectedMonth);
     const remaining = due - paid;
     if (remaining <= 0) return;
-    confirmAction(
-      'تأكيد الدفع الكامل',
-      `تسجيل دفع كامل بمبلغ ${remaining.toLocaleString()} من ${sub.name}؟`,
-      async () => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-        await app.recordPayment(sub.id, selectedMonth, remaining, 'full');
-        const msg = `تم استلام دفعة كاملة بمبلغ ${remaining.toLocaleString()} من ${sub.name} لاشتراك ${getTierLabel(sub.tier)} بتاريخ ${new Date().toLocaleDateString('ar-IQ')}`;
-        sendWhatsApp(sub.phone, msg);
-      }
-    );
+    showAlert({
+      type: 'confirm',
+      title: 'تأكيد الدفع الكامل',
+      message: `تسجيل دفع كامل بمبلغ ${remaining.toLocaleString()} من ${sub.name}؟`,
+      icon: 'dollar-sign',
+      buttons: [
+        { text: 'إلغاء', style: 'cancel' },
+        { text: 'تأكيد الدفع', style: 'destructive', onPress: async () => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          await app.recordPayment(sub.id, selectedMonth, remaining, 'full');
+          const msg = `تم استلام دفعة كاملة بمبلغ ${remaining.toLocaleString()} من ${sub.name} لاشتراك ${getTierLabel(sub.tier)} بتاريخ ${new Date().toLocaleDateString('ar-IQ')}`;
+          sendWhatsApp(sub.phone, msg);
+        }},
+      ],
+    });
   }
 
   function openPartialPayment(sub: Subscriber) {
@@ -246,14 +245,19 @@ export default function DashboardScreen() {
   }
 
   function handleCancelPayment(paymentId: string) {
-    confirmAction(
-      'إلغاء الدفعة',
-      'هل أنت متأكد من إلغاء هذه الدفعة؟',
-      async () => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        await app.cancelPayment(paymentId);
-      }
-    );
+    showAlert({
+      type: 'confirm',
+      title: 'إلغاء الدفعة',
+      message: 'هل أنت متأكد من إلغاء هذه الدفعة؟',
+      icon: 'x-circle',
+      buttons: [
+        { text: 'إلغاء', style: 'cancel' },
+        { text: 'إلغاء الدفعة', style: 'destructive', onPress: async () => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          await app.cancelPayment(paymentId);
+        }},
+      ],
+    });
   }
 
   function sendWhatsApp(phone: string, message: string) {
@@ -279,14 +283,19 @@ export default function DashboardScreen() {
   }
 
   function handleDeleteExpense(id: string) {
-    confirmAction(
-      'حذف المصروف',
-      'هل أنت متأكد من حذف هذا المصروف؟',
-      async () => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        await app.deleteExpense(id);
-      }
-    );
+    showAlert({
+      type: 'confirm',
+      title: 'حذف المصروف',
+      message: 'هل أنت متأكد من حذف هذا المصروف؟',
+      icon: 'trash-2',
+      buttons: [
+        { text: 'إلغاء', style: 'cancel' },
+        { text: 'حذف', style: 'destructive', onPress: async () => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          await app.deleteExpense(id);
+        }},
+      ],
+    });
   }
 
   function handleLogout() {

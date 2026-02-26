@@ -9,6 +9,7 @@ import { useFonts, Cairo_400Regular, Cairo_600SemiBold, Cairo_700Bold } from '@e
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { queryClient } from '@/lib/query-client';
 import { AppProvider } from '@/contexts/AppContext';
+import { AlertProvider } from '@/components/CustomAlert';
 import Colors from '@/constants/colors';
 
 SplashScreen.preventAutoHideAsync();
@@ -52,9 +53,11 @@ export default function RootLayout() {
       <QueryClientProvider client={queryClient}>
         <GestureHandlerRootView style={{ flex: 1 }}>
           <KeyboardProvider>
-            <AppProvider>
-              <RootLayoutNav />
-            </AppProvider>
+            <AlertProvider>
+              <AppProvider>
+                <RootLayoutNav />
+              </AppProvider>
+            </AlertProvider>
           </KeyboardProvider>
         </GestureHandlerRootView>
       </QueryClientProvider>

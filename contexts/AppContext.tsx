@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef, ReactNode } from 'react';
-import { AppState, AppStateStatus, Alert, Platform } from 'react-native';
+import { AppState, AppStateStatus } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import NetInfo from '@react-native-community/netinfo';
+import { useAlert } from '@/components/CustomAlert';
 import {
   Storage, Owner, Subscriber, MonthlyPricing, Payment, Expense, Session,
   UserStatus, ADMIN_EMAIL, ADMIN_PASSWORD, isOwnerExpired, getOwnerExpiryDate,
@@ -43,15 +44,19 @@ interface AppContextValue {
 
 const AppContext = createContext<AppContextValue | null>(null);
 
-function showToast(message: string) {
-  if (Platform.OS === 'web') {
-    console.log(message);
-  } else {
-    Alert.alert('', message);
-  }
-}
-
 export function AppProvider({ children }: { children: ReactNode }) {
+  const alert = useAlert();
+  const alertRef = useRef(alert);
+  alertRef.current = alert;
+
+  function showToast(message: string, type: 'success' | 'error' = 'success') {
+    if (type === 'error') {
+      alertRef.current.showError(message);
+    } else {
+      alertRef.current.showSuccess(message);
+    }
+  }
+
   const [session, setSession] = useState<Session>(null);
   const [loading, setLoading] = useState(true);
   const [isOnline, setIsOnline] = useState(true);
@@ -238,7 +243,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       await Storage.saveSubscribers(currentOwner.id, updated);
     } catch (e) {
       console.error('Add subscriber error:', e);
-      showToast('حدث خطأ أثناء إضافة المشترك');
+      showToast('حدث خطأ أثناء إضافة المشترك', 'error');
     }
   }, [currentOwner, subscribers]);
 
@@ -251,7 +256,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       await Storage.saveSubscribers(currentOwner.id, updated);
     } catch (e) {
       console.error('Update subscriber error:', e);
-      showToast('حدث خطأ أثناء تعديل المشترك');
+      showToast('حدث خطأ أثناء تعديل المشترك', 'error');
     }
   }, [currentOwner, subscribers]);
 
@@ -266,7 +271,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       await Storage.savePayments(currentOwner.id, updatedPayments);
     } catch (e) {
       console.error('Delete subscriber error:', e);
-      showToast('حدث خطأ أثناء حذف المشترك');
+      showToast('حدث خطأ أثناء حذف المشترك', 'error');
     }
   }, [currentOwner, subscribers, payments]);
 
@@ -278,7 +283,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       await Storage.savePricing(currentOwner.id, updated);
     } catch (e) {
       console.error('Set pricing error:', e);
-      showToast('حدث خطأ أثناء حفظ الأسعار');
+      showToast('حدث خطأ أثناء حفظ الأسعار', 'error');
     }
   }, [currentOwner, pricing]);
 
@@ -297,7 +302,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       await Storage.savePayments(currentOwner.id, updated);
     } catch (e) {
       console.error('Record payment error:', e);
-      showToast('حدث خطأ أثناء تسجيل الدفعة');
+      showToast('حدث خطأ أثناء تسجيل الدفعة', 'error');
     }
   }, [currentOwner, payments]);
 
@@ -309,7 +314,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       await Storage.savePayments(currentOwner.id, updated);
     } catch (e) {
       console.error('Cancel payment error:', e);
-      showToast('حدث خطأ أثناء إلغاء الدفعة');
+      showToast('حدث خطأ أثناء إلغاء الدفعة', 'error');
     }
   }, [currentOwner, payments]);
 
@@ -323,7 +328,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       await Storage.saveExpenses(currentOwner.id, updated);
     } catch (e) {
       console.error('Add expense error:', e);
-      showToast('حدث خطأ أثناء إضافة المصروف');
+      showToast('حدث خطأ أثناء إضافة المصروف', 'error');
     }
   }, [currentOwner, expenses]);
 
@@ -335,7 +340,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       await Storage.saveExpenses(currentOwner.id, updated);
     } catch (e) {
       console.error('Delete expense error:', e);
-      showToast('حدث خطأ أثناء حذف المصروف');
+      showToast('حدث خطأ أثناء حذف المصروف', 'error');
     }
   }, [currentOwner, expenses]);
 
@@ -344,7 +349,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const allOwners = await Storage.getOwners();
       const target = allOwners.find(o => o.id === ownerId);
       if (!target) {
-        showToast('لم يتم العثور على المالك');
+        showToast('لم يتم العثور على المالك', 'error');
         return;
       }
       const now = new Date();
@@ -365,7 +370,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       showToast(`تم قبول ${target.name} بنجاح`);
     } catch (e) {
       console.error('Approve owner error:', e);
-      showToast('حدث خطأ أثناء قبول المالك');
+      showToast('حدث خطأ أثناء قبول المالك', 'error');
     }
   }, []);
 
@@ -374,7 +379,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const allOwners = await Storage.getOwners();
       const target = allOwners.find(o => o.id === ownerId);
       if (!target) {
-        showToast('لم يتم العثور على المالك');
+        showToast('لم يتم العثور على المالك', 'error');
         return;
       }
       const updated = allOwners.map(o =>
@@ -385,7 +390,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       showToast(`تم رفض ${target.name}`);
     } catch (e) {
       console.error('Reject owner error:', e);
-      showToast('حدث خطأ أثناء رفض المالك');
+      showToast('حدث خطأ أثناء رفض المالك', 'error');
     }
   }, []);
 
@@ -394,7 +399,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const allOwners = await Storage.getOwners();
       const target = allOwners.find(o => o.id === ownerId);
       if (!target) {
-        showToast('لم يتم العثور على المالك');
+        showToast('لم يتم العثور على المالك', 'error');
         return;
       }
       const updated = allOwners.filter(o => o.id !== ownerId);
@@ -403,7 +408,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       showToast(`تم حذف ${target.name} بنجاح`);
     } catch (e) {
       console.error('Delete owner error:', e);
-      showToast('حدث خطأ أثناء حذف المالك');
+      showToast('حدث خطأ أثناء حذف المالك', 'error');
     }
   }, []);
 
@@ -412,7 +417,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const allOwners = await Storage.getOwners();
       const target = allOwners.find(o => o.id === ownerId);
       if (!target) {
-        showToast('لم يتم العثور على المالك');
+        showToast('لم يتم العثور على المالك', 'error');
         return;
       }
       const updated = allOwners.map(o => {
@@ -439,7 +444,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       showToast(`تم تجديد اشتراك ${target.name} لمدة ${months} شهر`);
     } catch (e) {
       console.error('Renew owner error:', e);
-      showToast('حدث خطأ أثناء تجديد الاشتراك');
+      showToast('حدث خطأ أثناء تجديد الاشتراك', 'error');
     }
   }, []);
 
@@ -448,7 +453,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const allOwners = await Storage.getOwners();
       const target = allOwners.find(o => o.id === ownerId);
       if (!target) {
-        showToast('لم يتم العثور على المالك');
+        showToast('لم يتم العثور على المالك', 'error');
         return;
       }
       const newActive = !target.isActive;
@@ -460,7 +465,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       showToast(newActive ? `تم تفعيل حساب ${target.name}` : `تم تعطيل حساب ${target.name}`);
     } catch (e) {
       console.error('Toggle owner active error:', e);
-      showToast('حدث خطأ أثناء تغيير حالة الحساب');
+      showToast('حدث خطأ أثناء تغيير حالة الحساب', 'error');
     }
   }, []);
 
