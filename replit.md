@@ -44,6 +44,16 @@ A comprehensive Arabic RTL subscription management app for generator services bu
 - Email: rb885491@gmail.com
 - Password: E4toy1234
 
+## Deployment (VPS / almolda.com)
+- **CORS**: Server allows all origins (origin: '*') - ready for any domain
+- **Frontend API URL**: Falls back to `almolda.com` when `EXPO_PUBLIC_DOMAIN` is not set
+- **Build script**: Falls back to `almolda.com` domain when no Replit env vars are present
+- **Environment Variables for VPS**:
+  - `EXPO_PUBLIC_DOMAIN=almolda.com` (frontend API target)
+  - `PORT=5000` (Express server port, optional - defaults to 5000)
+  - `NODE_ENV=production` (for production mode)
+- **No Replit-specific dependencies**: Server and frontend work without Replit env vars
+
 ## Key Dependencies
 - @react-native-community/netinfo - Offline detection
 - @expo-google-fonts/cairo - Arabic font

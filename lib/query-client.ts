@@ -9,10 +9,12 @@ export function getApiUrl(): string {
   let host = process.env.EXPO_PUBLIC_DOMAIN;
 
   if (!host) {
-    throw new Error("EXPO_PUBLIC_DOMAIN is not set");
+    host = "almolda.com";
   }
 
-  let url = new URL(`https://${host}`);
+  host = host.replace(/^https?:\/\//, "");
+
+  const url = new URL(`https://${host}`);
 
   return url.href;
 }
