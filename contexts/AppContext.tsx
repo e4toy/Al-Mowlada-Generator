@@ -7,11 +7,17 @@ import {
   Storage, Owner, Subscriber, MonthlyPricing, Payment, Expense, Session,
   UserStatus, ADMIN_EMAIL, ADMIN_PASSWORD, isOwnerExpired, getOwnerExpiryDate,
 } from '@/lib/storage';
+import {
+  syncOwnerToServer, syncOwnerUpdate, syncFullData, syncDelete,
+  fetchOwnersFromServer, fetchOwnerFromServer, fetchOwnerDataFromServer,
+  processPendingSyncActions, loginOnServer, deleteOwnerOnServer,
+} from '@/lib/sync';
 
 interface AppContextValue {
   session: Session;
   loading: boolean;
   isOnline: boolean;
+  isSyncing: boolean;
   currentOwner: Owner | null;
   owners: Owner[];
   subscribers: Subscriber[];
@@ -40,6 +46,7 @@ interface AppContextValue {
   getSubscriberPayments: (subscriberId: string, month: string) => Payment[];
   getSubscriberDue: (subscriber: Subscriber, month: string) => number;
   getSubscriberPaid: (subscriberId: string, month: string) => number;
+  syncNow: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -60,14 +67,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session>(null);
   const [loading, setLoading] = useState(true);
   const [isOnline, setIsOnline] = useState(true);
+  const [isSyncing, setIsSyncing] = useState(false);
   const [owners, setOwners] = useState<Owner[]>([]);
   const [currentOwner, setCurrentOwner] = useState<Owner | null>(null);
   const [subscribers, setSubscribers] = useState<Subscriber[]>([]);
   const [pricing, setPricingState] = useState<Record<string, MonthlyPricing>>({});
   const [payments, setPayments] = useState<Payment[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
-  const backgroundTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const backgroundTimeRef = useRef<number | null>(null);
+  const isOnlineRef = useRef(true);
+  const syncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     loadSession();
@@ -75,7 +84,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const unsubscribe = NetInfo.addEventListener(state => {
-      setIsOnline(state.isConnected ?? true);
+      const online = state.isConnected ?? true;
+      const wasOffline = !isOnlineRef.current;
+      isOnlineRef.current = online;
+      setIsOnline(online);
+      if (online && wasOffline) {
+        if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+        syncTimeoutRef.current = setTimeout(() => {
+          triggerSync();
+        }, 2000);
+      }
     });
     return () => unsubscribe();
   }, []);
@@ -97,6 +115,41 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     }
   }, [session]);
+
+  async function triggerSync() {
+    if (isSyncing) return;
+    try {
+      setIsSyncing(true);
+      const savedSession = await Storage.getSession();
+      if (savedSession?.type === 'owner' && savedSession.ownerId) {
+        const owner = (await Storage.getOwners()).find(o => o.id === savedSession.ownerId);
+        if (owner) {
+          await syncOwnerToServer(owner);
+          const [subs, prc, pays, exps] = await Promise.all([
+            Storage.getSubscribers(savedSession.ownerId),
+            Storage.getPricing(savedSession.ownerId),
+            Storage.getPayments(savedSession.ownerId),
+            Storage.getExpenses(savedSession.ownerId),
+          ]);
+          await syncFullData(savedSession.ownerId, subs, pays, exps, prc);
+          await processPendingSyncActions(savedSession.ownerId);
+        }
+      } else if (savedSession?.type === 'admin') {
+        const localOwners = await Storage.getOwners();
+        for (const owner of localOwners) {
+          await syncOwnerToServer(owner);
+        }
+      }
+    } catch (e) {
+      console.error('Sync error:', e);
+    } finally {
+      setIsSyncing(false);
+    }
+  }
+
+  const syncNow = useCallback(async () => {
+    await triggerSync();
+  }, []);
 
   async function loadSession() {
     try {
@@ -154,7 +207,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const login = useCallback(async (email: string, password: string): Promise<{ success: boolean; message: string; pending?: boolean; suspended?: boolean }> => {
     try {
       const allOwners = await Storage.getOwners();
-      const owner = allOwners.find(o => o.email.toLowerCase() === email.toLowerCase());
+      let owner = allOwners.find(o => o.email.toLowerCase() === email.toLowerCase());
+
+      if (!owner && isOnlineRef.current) {
+        const serverResult = await loginOnServer(email, password);
+        if (serverResult.success && serverResult.owner) {
+          const serverOwner: Owner = serverResult.owner;
+          allOwners.push(serverOwner);
+          await Storage.saveOwners(allOwners);
+          owner = serverOwner;
+        } else if (!serverResult.success) {
+          return { success: false, message: serverResult.message || 'البريد الإلكتروني غير مسجل' };
+        }
+      }
+
       if (!owner) return { success: false, message: 'البريد الإلكتروني غير مسجل' };
       if (owner.password !== password) return { success: false, message: 'كلمة المرور غير صحيحة' };
       if (owner.status === UserStatus.PENDING) {
@@ -178,6 +244,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setCurrentOwner(owner);
       setOwners(allOwners);
       await loadOwnerData(owner.id);
+
+      if (isOnlineRef.current) {
+        const serverData = await fetchOwnerDataFromServer(owner.id);
+        if (serverData) {
+          const localSubs = await Storage.getSubscribers(owner.id);
+          if (localSubs.length === 0 && serverData.subscribers.length > 0) {
+            await Storage.saveSubscribers(owner.id, serverData.subscribers);
+            await Storage.savePayments(owner.id, serverData.payments);
+            await Storage.saveExpenses(owner.id, serverData.expenses);
+            await Storage.savePricing(owner.id, serverData.pricing);
+            setSubscribers(serverData.subscribers);
+            setPayments(serverData.payments);
+            setExpenses(serverData.expenses);
+            setPricingState(serverData.pricing);
+          }
+        }
+      }
+
       return { success: true, message: '' };
     } catch (e) {
       console.error('Login error:', e);
@@ -204,6 +288,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       };
       allOwners.push(newOwner);
       await Storage.saveOwners(allOwners);
+
+      if (isOnlineRef.current) {
+        await syncOwnerToServer(newOwner);
+      }
+
       return { success: true, message: 'تم إنشاء حسابك بنجاح وهو قيد المراجعة' };
     } catch (e) {
       console.error('Signup error:', e);
@@ -216,14 +305,59 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const newSession: Session = { type: 'admin' };
       await Storage.saveSession(newSession);
       setSession(newSession);
-      const allOwners = await Storage.getOwners();
-      setOwners(allOwners);
+
+      if (isOnlineRef.current) {
+        try {
+          const serverOwners = await fetchOwnersFromServer();
+          if (serverOwners.length > 0) {
+            const localOwners = await Storage.getOwners();
+            const mergedMap = new Map<string, Owner>();
+            for (const o of localOwners) mergedMap.set(o.id, o);
+            for (const o of serverOwners) {
+              const local = mergedMap.get(o.id);
+              if (!local || new Date(o.updatedAt) > new Date(local.updatedAt)) {
+                mergedMap.set(o.id, o);
+              }
+            }
+            const merged = Array.from(mergedMap.values());
+            await Storage.saveOwners(merged);
+            setOwners(merged);
+          } else {
+            const allOwners = await Storage.getOwners();
+            setOwners(allOwners);
+            for (const owner of allOwners) {
+              await syncOwnerToServer(owner);
+            }
+          }
+        } catch {
+          const allOwners = await Storage.getOwners();
+          setOwners(allOwners);
+        }
+      } else {
+        const allOwners = await Storage.getOwners();
+        setOwners(allOwners);
+      }
+
       return true;
     }
     return false;
   }, []);
 
   const logout = useCallback(async () => {
+    if (isOnlineRef.current && currentOwner) {
+      try {
+        const [subs, prc, pays, exps] = await Promise.all([
+          Storage.getSubscribers(currentOwner.id),
+          Storage.getPricing(currentOwner.id),
+          Storage.getPayments(currentOwner.id),
+          Storage.getExpenses(currentOwner.id),
+        ]);
+        await syncFullData(currentOwner.id, subs, pays, exps, prc);
+      } catch (e) {
+        console.error('Sync on logout error:', e);
+      }
+    }
+
     await Storage.saveSession(null);
     setSession(null);
     setCurrentOwner(null);
@@ -231,7 +365,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setPricingState({});
     setPayments([]);
     setExpenses([]);
-  }, []);
+  }, [currentOwner]);
 
   const addSubscriber = useCallback(async (data: Omit<Subscriber, 'id'>) => {
     if (!currentOwner) return;
@@ -241,11 +375,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const updated = [...subscribers, sub];
       setSubscribers(updated);
       await Storage.saveSubscribers(currentOwner.id, updated);
+      if (isOnlineRef.current) {
+        syncFullData(currentOwner.id, updated, payments, expenses, pricing).catch(() => {});
+      }
     } catch (e) {
       console.error('Add subscriber error:', e);
       showToast('حدث خطأ أثناء إضافة المشترك', 'error');
     }
-  }, [currentOwner, subscribers]);
+  }, [currentOwner, subscribers, payments, expenses, pricing]);
 
   const updateSubscriber = useCallback(async (id: string, data: Partial<Omit<Subscriber, 'id'>>) => {
     if (!currentOwner) return;
@@ -254,11 +391,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const updated = subscribers.map(s => s.id === id ? { ...s, ...data, updatedAt: now } : s);
       setSubscribers(updated);
       await Storage.saveSubscribers(currentOwner.id, updated);
+      if (isOnlineRef.current) {
+        syncFullData(currentOwner.id, updated, payments, expenses, pricing).catch(() => {});
+      }
     } catch (e) {
       console.error('Update subscriber error:', e);
       showToast('حدث خطأ أثناء تعديل المشترك', 'error');
     }
-  }, [currentOwner, subscribers]);
+  }, [currentOwner, subscribers, payments, expenses, pricing]);
 
   const deleteSubscriber = useCallback(async (id: string) => {
     if (!currentOwner) return;
@@ -269,6 +409,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const updatedPayments = payments.filter(p => p.subscriberId !== id);
       setPayments(updatedPayments);
       await Storage.savePayments(currentOwner.id, updatedPayments);
+      if (isOnlineRef.current) {
+        syncDelete('subscriber', id, currentOwner.id).catch(() => {});
+      } else {
+        await Storage.addSyncAction({
+          id: Crypto.randomUUID(),
+          type: 'delete',
+          entity: 'subscriber',
+          data: { id },
+          timestamp: new Date().toISOString(),
+        });
+      }
     } catch (e) {
       console.error('Delete subscriber error:', e);
       showToast('حدث خطأ أثناء حذف المشترك', 'error');
@@ -281,11 +432,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const updated = { ...pricing, [month]: prices };
       setPricingState(updated);
       await Storage.savePricing(currentOwner.id, updated);
+      if (isOnlineRef.current) {
+        syncFullData(currentOwner.id, subscribers, payments, expenses, updated).catch(() => {});
+      }
     } catch (e) {
       console.error('Set pricing error:', e);
       showToast('حدث خطأ أثناء حفظ الأسعار', 'error');
     }
-  }, [currentOwner, pricing]);
+  }, [currentOwner, pricing, subscribers, payments, expenses]);
 
   const recordPayment = useCallback(async (subscriberId: string, month: string, amount: number, type: 'full' | 'partial') => {
     if (!currentOwner) return;
@@ -300,11 +454,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const updated = [...payments, payment];
       setPayments(updated);
       await Storage.savePayments(currentOwner.id, updated);
+      if (isOnlineRef.current) {
+        syncFullData(currentOwner.id, subscribers, updated, expenses, pricing).catch(() => {});
+      }
     } catch (e) {
       console.error('Record payment error:', e);
       showToast('حدث خطأ أثناء تسجيل الدفعة', 'error');
     }
-  }, [currentOwner, payments]);
+  }, [currentOwner, payments, subscribers, expenses, pricing]);
 
   const cancelPayment = useCallback(async (paymentId: string) => {
     if (!currentOwner) return;
@@ -312,6 +469,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const updated = payments.filter(p => p.id !== paymentId);
       setPayments(updated);
       await Storage.savePayments(currentOwner.id, updated);
+      if (isOnlineRef.current) {
+        syncDelete('payment', paymentId, currentOwner.id).catch(() => {});
+      } else {
+        await Storage.addSyncAction({
+          id: Crypto.randomUUID(),
+          type: 'delete',
+          entity: 'payment',
+          data: { id: paymentId },
+          timestamp: new Date().toISOString(),
+        });
+      }
     } catch (e) {
       console.error('Cancel payment error:', e);
       showToast('حدث خطأ أثناء إلغاء الدفعة', 'error');
@@ -326,11 +494,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const updated = [...expenses, expense];
       setExpenses(updated);
       await Storage.saveExpenses(currentOwner.id, updated);
+      if (isOnlineRef.current) {
+        syncFullData(currentOwner.id, subscribers, payments, updated, pricing).catch(() => {});
+      }
     } catch (e) {
       console.error('Add expense error:', e);
       showToast('حدث خطأ أثناء إضافة المصروف', 'error');
     }
-  }, [currentOwner, expenses]);
+  }, [currentOwner, expenses, subscribers, payments, pricing]);
 
   const deleteExpense = useCallback(async (id: string) => {
     if (!currentOwner) return;
@@ -338,11 +509,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const updated = expenses.filter(e => e.id !== id);
       setExpenses(updated);
       await Storage.saveExpenses(currentOwner.id, updated);
+      if (isOnlineRef.current) {
+        syncDelete('expense', id, currentOwner.id).catch(() => {});
+      } else {
+        await Storage.addSyncAction({
+          id: Crypto.randomUUID(),
+          type: 'delete',
+          entity: 'expense',
+          data: { id },
+          timestamp: new Date().toISOString(),
+        });
+      }
     } catch (e) {
       console.error('Delete expense error:', e);
       showToast('حدث خطأ أثناء حذف المصروف', 'error');
     }
-  }, [currentOwner, expenses]);
+  }, [currentOwner, expenses, subscribers, payments, pricing]);
 
   const approveOwner = useCallback(async (ownerId: string) => {
     try {
@@ -355,19 +537,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const now = new Date();
       const expiry = new Date(now);
       expiry.setDate(expiry.getDate() + 30);
-      const updated = allOwners.map(o =>
-        o.id === ownerId ? {
-          ...o,
-          status: UserStatus.APPROVED,
-          isActive: true,
-          activatedAt: now.toISOString(),
-          expiryDate: expiry.toISOString(),
-          updatedAt: now.toISOString(),
-        } : o
-      );
+      const updatedOwner = {
+        ...target,
+        status: UserStatus.APPROVED,
+        isActive: true,
+        activatedAt: now.toISOString(),
+        expiryDate: expiry.toISOString(),
+        updatedAt: now.toISOString(),
+      };
+      const updated = allOwners.map(o => o.id === ownerId ? updatedOwner : o);
       await Storage.saveOwners(updated);
       setOwners(updated);
       showToast(`تم قبول ${target.name} بنجاح`);
+      if (isOnlineRef.current) {
+        syncOwnerUpdate(updatedOwner).catch(() => {});
+      }
     } catch (e) {
       console.error('Approve owner error:', e);
       showToast('حدث خطأ أثناء قبول المالك', 'error');
@@ -382,12 +566,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
         showToast('لم يتم العثور على المالك', 'error');
         return;
       }
-      const updated = allOwners.map(o =>
-        o.id === ownerId ? { ...o, status: UserStatus.REJECTED, updatedAt: new Date().toISOString() } : o
-      );
+      const updatedOwner = { ...target, status: UserStatus.REJECTED, updatedAt: new Date().toISOString() };
+      const updated = allOwners.map(o => o.id === ownerId ? updatedOwner : o);
       await Storage.saveOwners(updated);
       setOwners(updated);
       showToast(`تم رفض ${target.name}`);
+      if (isOnlineRef.current) {
+        syncOwnerUpdate(updatedOwner).catch(() => {});
+      }
     } catch (e) {
       console.error('Reject owner error:', e);
       showToast('حدث خطأ أثناء رفض المالك', 'error');
@@ -406,6 +592,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       await Storage.saveOwners(updated);
       setOwners(updated);
       showToast(`تم حذف ${target.name} بنجاح`);
+      if (isOnlineRef.current) {
+        deleteOwnerOnServer(ownerId).catch(() => {});
+      }
     } catch (e) {
       console.error('Delete owner error:', e);
       showToast('حدث خطأ أثناء حذف المالك', 'error');
@@ -420,28 +609,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
         showToast('لم يتم العثور على المالك', 'error');
         return;
       }
-      const updated = allOwners.map(o => {
-        if (o.id !== ownerId) return o;
-        const now = new Date();
-        let baseDate = now;
-        if (o.expiryDate) {
-          const existing = new Date(o.expiryDate);
-          if (existing > now) baseDate = existing;
-        }
-        const expiry = new Date(baseDate);
-        expiry.setDate(expiry.getDate() + (months * 30));
-        return {
-          ...o,
-          status: UserStatus.APPROVED,
-          isActive: true,
-          activatedAt: o.activatedAt || now.toISOString(),
-          expiryDate: expiry.toISOString(),
-          updatedAt: now.toISOString(),
-        };
-      });
+      const now = new Date();
+      let baseDate = now;
+      if (target.expiryDate) {
+        const existing = new Date(target.expiryDate);
+        if (existing > now) baseDate = existing;
+      }
+      const expiry = new Date(baseDate);
+      expiry.setDate(expiry.getDate() + (months * 30));
+      const updatedOwner = {
+        ...target,
+        status: UserStatus.APPROVED,
+        isActive: true,
+        activatedAt: target.activatedAt || now.toISOString(),
+        expiryDate: expiry.toISOString(),
+        updatedAt: now.toISOString(),
+      };
+      const updated = allOwners.map(o => o.id !== ownerId ? o : updatedOwner);
       await Storage.saveOwners(updated);
       setOwners(updated);
       showToast(`تم تجديد اشتراك ${target.name} لمدة ${months} شهر`);
+      if (isOnlineRef.current) {
+        syncOwnerUpdate(updatedOwner).catch(() => {});
+      }
     } catch (e) {
       console.error('Renew owner error:', e);
       showToast('حدث خطأ أثناء تجديد الاشتراك', 'error');
@@ -457,12 +647,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
         return;
       }
       const newActive = !target.isActive;
-      const updated = allOwners.map(o =>
-        o.id === ownerId ? { ...o, isActive: newActive, updatedAt: new Date().toISOString() } : o
-      );
+      const updatedOwner = { ...target, isActive: newActive, updatedAt: new Date().toISOString() };
+      const updated = allOwners.map(o => o.id === ownerId ? updatedOwner : o);
       await Storage.saveOwners(updated);
       setOwners(updated);
       showToast(newActive ? `تم تفعيل حساب ${target.name}` : `تم تعطيل حساب ${target.name}`);
+      if (isOnlineRef.current) {
+        syncOwnerUpdate(updatedOwner).catch(() => {});
+      }
     } catch (e) {
       console.error('Toggle owner active error:', e);
       showToast('حدث خطأ أثناء تغيير حالة الحساب', 'error');
@@ -471,15 +663,47 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const refreshOwners = useCallback(async () => {
     try {
+      if (isOnlineRef.current) {
+        const serverOwners = await fetchOwnersFromServer();
+        if (serverOwners.length > 0) {
+          const localOwners = await Storage.getOwners();
+          const mergedMap = new Map<string, Owner>();
+          for (const o of localOwners) mergedMap.set(o.id, o);
+          for (const o of serverOwners) {
+            const local = mergedMap.get(o.id);
+            if (!local || new Date(o.updatedAt) > new Date(local.updatedAt)) {
+              mergedMap.set(o.id, o);
+            }
+          }
+          const merged = Array.from(mergedMap.values());
+          await Storage.saveOwners(merged);
+          setOwners(merged);
+          return;
+        }
+      }
       const allOwners = await Storage.getOwners();
       setOwners(allOwners);
     } catch (e) {
       console.error('Refresh owners error:', e);
+      const allOwners = await Storage.getOwners();
+      setOwners(allOwners);
     }
   }, []);
 
   const refreshCurrentOwner = useCallback(async (): Promise<Owner | null> => {
     try {
+      if (isOnlineRef.current && currentOwner) {
+        const serverOwner = await fetchOwnerFromServer(currentOwner.id);
+        if (serverOwner) {
+          const allOwners = await Storage.getOwners();
+          const updated = allOwners.map(o => o.id === serverOwner.id ? serverOwner : o);
+          await Storage.saveOwners(updated);
+          setOwners(updated);
+          setCurrentOwner(serverOwner);
+          return serverOwner;
+        }
+      }
+
       const allOwners = await Storage.getOwners();
       setOwners(allOwners);
       if (currentOwner) {
@@ -513,21 +737,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [payments]);
 
   const value = useMemo(() => ({
-    session, loading, isOnline, currentOwner, owners, subscribers, pricing, payments, expenses,
+    session, loading, isOnline, isSyncing, currentOwner, owners, subscribers, pricing, payments, expenses,
     login, signup, adminLogin, logout,
     addSubscriber, updateSubscriber, deleteSubscriber, setPricing,
     recordPayment, cancelPayment,
     addExpense, deleteExpense,
     approveOwner, rejectOwner, deleteOwner, renewOwner, toggleOwnerActive,
     refreshOwners, refreshCurrentOwner, getSubscriberPayments, getSubscriberDue, getSubscriberPaid,
+    syncNow,
   }), [
-    session, loading, isOnline, currentOwner, owners, subscribers, pricing, payments, expenses,
+    session, loading, isOnline, isSyncing, currentOwner, owners, subscribers, pricing, payments, expenses,
     login, signup, adminLogin, logout,
     addSubscriber, updateSubscriber, deleteSubscriber, setPricing,
     recordPayment, cancelPayment,
     addExpense, deleteExpense,
     approveOwner, rejectOwner, deleteOwner, renewOwner, toggleOwnerActive,
     refreshOwners, refreshCurrentOwner, getSubscriberPayments, getSubscriberDue, getSubscriberPaid,
+    syncNow,
   ]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
