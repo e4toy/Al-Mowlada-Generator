@@ -289,8 +289,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       allOwners.push(newOwner);
       await Storage.saveOwners(allOwners);
 
-      if (isOnlineRef.current) {
-        await syncOwnerToServer(newOwner);
+      try {
+        const synced = await syncOwnerToServer(newOwner);
+        if (!synced) {
+          console.warn('Signup sync failed, will retry on next connection');
+        }
+      } catch (syncErr) {
+        console.error('Signup sync error:', syncErr);
       }
 
       return { success: true, message: 'تم إنشاء حسابك بنجاح وهو قيد المراجعة' };
@@ -306,34 +311,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
       await Storage.saveSession(newSession);
       setSession(newSession);
 
-      if (isOnlineRef.current) {
-        try {
-          const serverOwners = await fetchOwnersFromServer();
-          if (serverOwners.length > 0) {
-            const localOwners = await Storage.getOwners();
-            const mergedMap = new Map<string, Owner>();
-            for (const o of localOwners) mergedMap.set(o.id, o);
-            for (const o of serverOwners) {
-              const local = mergedMap.get(o.id);
-              if (!local || new Date(o.updatedAt) > new Date(local.updatedAt)) {
-                mergedMap.set(o.id, o);
-              }
-            }
-            const merged = Array.from(mergedMap.values());
-            await Storage.saveOwners(merged);
-            setOwners(merged);
-          } else {
-            const allOwners = await Storage.getOwners();
-            setOwners(allOwners);
-            for (const owner of allOwners) {
-              await syncOwnerToServer(owner);
+      try {
+        const serverOwners = await fetchOwnersFromServer();
+        if (serverOwners.length > 0) {
+          const localOwners = await Storage.getOwners();
+          const mergedMap = new Map<string, Owner>();
+          for (const o of localOwners) mergedMap.set(o.id, o);
+          for (const o of serverOwners) {
+            const local = mergedMap.get(o.id);
+            if (!local || new Date(o.updatedAt) > new Date(local.updatedAt)) {
+              mergedMap.set(o.id, o);
             }
           }
-        } catch {
+          const merged = Array.from(mergedMap.values());
+          await Storage.saveOwners(merged);
+          setOwners(merged);
+        } else {
           const allOwners = await Storage.getOwners();
           setOwners(allOwners);
+          for (const owner of allOwners) {
+            syncOwnerToServer(owner).catch(() => {});
+          }
         }
-      } else {
+      } catch {
         const allOwners = await Storage.getOwners();
         setOwners(allOwners);
       }
@@ -549,9 +549,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       await Storage.saveOwners(updated);
       setOwners(updated);
       showToast(`تم قبول ${target.name} بنجاح`);
-      if (isOnlineRef.current) {
-        syncOwnerUpdate(updatedOwner).catch(() => {});
-      }
+      syncOwnerUpdate(updatedOwner).catch(() => {});
     } catch (e) {
       console.error('Approve owner error:', e);
       showToast('حدث خطأ أثناء قبول المالك', 'error');
@@ -571,9 +569,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       await Storage.saveOwners(updated);
       setOwners(updated);
       showToast(`تم رفض ${target.name}`);
-      if (isOnlineRef.current) {
-        syncOwnerUpdate(updatedOwner).catch(() => {});
-      }
+      syncOwnerUpdate(updatedOwner).catch(() => {});
     } catch (e) {
       console.error('Reject owner error:', e);
       showToast('حدث خطأ أثناء رفض المالك', 'error');
@@ -592,9 +588,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       await Storage.saveOwners(updated);
       setOwners(updated);
       showToast(`تم حذف ${target.name} بنجاح`);
-      if (isOnlineRef.current) {
-        deleteOwnerOnServer(ownerId).catch(() => {});
-      }
+      deleteOwnerOnServer(ownerId).catch(() => {});
     } catch (e) {
       console.error('Delete owner error:', e);
       showToast('حدث خطأ أثناء حذف المالك', 'error');
@@ -629,9 +623,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       await Storage.saveOwners(updated);
       setOwners(updated);
       showToast(`تم تجديد اشتراك ${target.name} لمدة ${months} شهر`);
-      if (isOnlineRef.current) {
-        syncOwnerUpdate(updatedOwner).catch(() => {});
-      }
+      syncOwnerUpdate(updatedOwner).catch(() => {});
     } catch (e) {
       console.error('Renew owner error:', e);
       showToast('حدث خطأ أثناء تجديد الاشتراك', 'error');
@@ -652,9 +644,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       await Storage.saveOwners(updated);
       setOwners(updated);
       showToast(newActive ? `تم تفعيل حساب ${target.name}` : `تم تعطيل حساب ${target.name}`);
-      if (isOnlineRef.current) {
-        syncOwnerUpdate(updatedOwner).catch(() => {});
-      }
+      syncOwnerUpdate(updatedOwner).catch(() => {});
     } catch (e) {
       console.error('Toggle owner active error:', e);
       showToast('حدث خطأ أثناء تغيير حالة الحساب', 'error');
@@ -663,23 +653,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const refreshOwners = useCallback(async () => {
     try {
-      if (isOnlineRef.current) {
-        const serverOwners = await fetchOwnersFromServer();
-        if (serverOwners.length > 0) {
-          const localOwners = await Storage.getOwners();
-          const mergedMap = new Map<string, Owner>();
-          for (const o of localOwners) mergedMap.set(o.id, o);
-          for (const o of serverOwners) {
-            const local = mergedMap.get(o.id);
-            if (!local || new Date(o.updatedAt) > new Date(local.updatedAt)) {
-              mergedMap.set(o.id, o);
-            }
+      const serverOwners = await fetchOwnersFromServer();
+      if (serverOwners.length > 0) {
+        const localOwners = await Storage.getOwners();
+        const mergedMap = new Map<string, Owner>();
+        for (const o of localOwners) mergedMap.set(o.id, o);
+        for (const o of serverOwners) {
+          const local = mergedMap.get(o.id);
+          if (!local || new Date(o.updatedAt) > new Date(local.updatedAt)) {
+            mergedMap.set(o.id, o);
           }
-          const merged = Array.from(mergedMap.values());
-          await Storage.saveOwners(merged);
-          setOwners(merged);
-          return;
         }
+        const merged = Array.from(mergedMap.values());
+        await Storage.saveOwners(merged);
+        setOwners(merged);
+        return;
       }
       const allOwners = await Storage.getOwners();
       setOwners(allOwners);

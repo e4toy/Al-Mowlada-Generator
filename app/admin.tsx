@@ -1,7 +1,7 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import {
   View, Text, Pressable, StyleSheet, SectionList, Modal, Switch,
-  Platform,
+  Platform, AppState,
 } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -17,6 +17,26 @@ export default function AdminDashboardScreen() {
   const insets = useSafeAreaInsets();
   const app = useApp();
   const { showAlert } = useAlert();
+
+  useEffect(() => {
+    app.refreshOwners();
+  }, []);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      app.refreshOwners();
+    }, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        app.refreshOwners();
+      }
+    });
+    return () => sub.remove();
+  }, []);
   const webTopInset = Platform.OS === 'web' ? 67 : 0;
   const webBottomInset = Platform.OS === 'web' ? 34 : 0;
   const topPad = (insets.top || webTopInset);

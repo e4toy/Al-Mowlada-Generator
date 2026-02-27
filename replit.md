@@ -15,7 +15,10 @@ A comprehensive Arabic RTL subscription management app for generator services bu
 - All data mutations save to AsyncStorage first (immediate, works offline)
 - When online, mutations are synced to PostgreSQL via REST API
 - Deletions queue as SyncAction items when offline, processed on reconnect
-- Admin login merges server owners with local owners (last-write-wins by updatedAt)
+- Admin login always fetches from server first, merges with local (last-write-wins by updatedAt)
+- Admin screen auto-refreshes owners on mount, every 30s, and on app foreground
+- Signup always attempts server sync regardless of network status detection
+- All admin operations (approve/reject/delete/renew/toggle) sync to server unconditionally
 - Owner login pulls server data if local is empty (first-device bootstrap)
 - All sync endpoints enforce ownerId scoping for multi-tenant isolation
 - Conflict resolution: server skips updates if its data is newer (updatedAt comparison)
