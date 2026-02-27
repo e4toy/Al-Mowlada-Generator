@@ -430,11 +430,11 @@ export default function DashboardScreen() {
 
       <View style={styles.yearRow}>
         <Pressable onPress={() => setSelectedYear(y => y - 1)} hitSlop={8}>
-          <Feather name="chevron-left" size={22} color={Colors.text} />
+          <Feather name="chevron-right" size={22} color={Colors.text} />
         </Pressable>
         <Text style={styles.yearText}>{selectedYear}</Text>
         <Pressable onPress={() => setSelectedYear(y => y + 1)} hitSlop={8}>
-          <Feather name="chevron-right" size={22} color={Colors.text} />
+          <Feather name="chevron-left" size={22} color={Colors.text} />
         </Pressable>
       </View>
 
@@ -907,13 +907,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    gap: 8,
-    paddingVertical: 6,
-    position: 'absolute',
-    top: 40,
     right: '15%',
     left: '35%',
-    marginBottom: 5,
+    marginBottom: 45,
+    marginTop: -45,
     width: 100,
   },
   yearText: {
@@ -927,7 +924,7 @@ const styles = StyleSheet.create({
     height: 50,
     flexShrink: 0,
     zIndex: 10,
-    marginTop: -15,
+    marginTop: -30,
   },
   monthScroll: {
     paddingHorizontal: 16,
@@ -1199,7 +1196,7 @@ const styles = StyleSheet.create({
   },
   emptyState: {
     alignItems: 'center',
-    paddingVertical: 135,
+    paddingVertical: 155,
     gap: 8,
   },
   emptyText: {
