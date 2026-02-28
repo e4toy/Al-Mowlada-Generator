@@ -5,16 +5,23 @@ import { fetch } from 'expo/fetch';
 async function apiCall(method: string, path: string, body?: unknown): Promise<any> {
   const baseUrl = getApiUrl();
   const url = new URL(path, baseUrl);
-  const res = await fetch(url.toString(), {
-    method,
-    headers: body ? { 'Content-Type': 'application/json' } : {},
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`${res.status}: ${text}`);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+  try {
+    const res = await fetch(url.toString(), {
+      method,
+      headers: body ? { 'Content-Type': 'application/json' } : {},
+      body: body ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`${res.status}: ${text}`);
+    }
+    return res.json();
+  } finally {
+    clearTimeout(timeout);
   }
-  return res.json();
 }
 
 export async function syncOwnerToServer(owner: Owner): Promise<boolean> {
@@ -140,6 +147,9 @@ export async function processPendingSyncActions(ownerId: string): Promise<void> 
     try {
       if (action.type === 'delete') {
         const success = await syncDelete(action.entity, (action.data as any).id, ownerId);
+        if (success) processed.push(action.id);
+      } else if (action.type === 'add' && action.entity === 'owner') {
+        const success = await syncOwnerToServer(action.data as Owner);
         if (success) processed.push(action.id);
       }
     } catch {

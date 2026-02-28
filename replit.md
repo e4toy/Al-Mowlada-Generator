@@ -1,27 +1,31 @@
 # Al-Mowlada (المولدة) - Arabic Generator Subscription Management App
 
 ## Overview
-A comprehensive Arabic RTL subscription management app for generator services built with Expo Router + Express backend. Uses a local-first architecture with AsyncStorage and PostgreSQL sync.
+A comprehensive Arabic RTL subscription management app for generator services built with Expo Router + Express backend. Uses a local-first architecture with AsyncStorage and PostgreSQL sync. Production domain: almolda.com
 
 ## Architecture
 - **Frontend**: Expo Router (file-based routing), React Native
 - **Backend**: Express + TypeScript on port 5000
-- **Database**: PostgreSQL (Drizzle ORM) for server-side persistence
+- **Database**: PostgreSQL (Drizzle ORM) for server-side persistence, SSL auto-detected for external DBs
 - **Local Storage**: AsyncStorage for offline-first data persistence
-- **Sync**: Local-first with background sync to PostgreSQL when online
+- **Sync**: Local-first with aggressive server sync - always attempts server first, falls back to local
 - **State**: React Context (AppContext) for global state
+- **API URL**: Configured via `EXPO_PUBLIC_API_URL` env var, defaults to `https://almolda.com`
 
-## Sync Architecture (Local-First)
+## Sync Architecture (Local-First Hybrid)
 - All data mutations save to AsyncStorage first (immediate, works offline)
-- When online, mutations are synced to PostgreSQL via REST API
-- Deletions queue as SyncAction items when offline, processed on reconnect
-- Admin login always fetches from server first, merges with local (last-write-wins by updatedAt)
+- ALL operations attempt server sync unconditionally (no network-status guards)
+- On sync failure, actions queued as SyncAction items in AsyncStorage
+- On reconnect (NetInfo), all pending sync actions are processed automatically
+- Login always tries server first, falls back to local on network error
+- Session restore fetches latest owner status from server
+- loadOwnerData merges server data with local data using LWW (last-write-wins by updatedAt)
+- Admin login/refreshOwners always fetches from server, merges with local
 - Admin screen auto-refreshes owners on mount, every 30s, and on app foreground
-- Signup always attempts server sync regardless of network status detection
-- All admin operations (approve/reject/delete/renew/toggle) sync to server unconditionally
-- Owner login pulls server data if local is empty (first-device bootstrap)
-- All sync endpoints enforce ownerId scoping for multi-tenant isolation
+- Signup always attempts immediate POST to server, queues on failure
+- Deletions: try server sync, queue to SyncAction on failure
 - Conflict resolution: server skips updates if its data is newer (updatedAt comparison)
+- All sync endpoints enforce ownerId scoping for multi-tenant isolation
 
 ## Key Features
 - Owner/Admin authentication system
@@ -44,13 +48,16 @@ A comprehensive Arabic RTL subscription management app for generator services bu
 - `app/` - Expo Router screens (index, signup, admin-login, pending, suspended, dashboard, admin)
 - `components/CustomAlert.tsx` - Premium custom modal system (AlertProvider + useAlert)
 - `lib/storage.ts` - Data models, AsyncStorage helpers, utilities
-- `lib/sync.ts` - Server sync functions (push/pull/delete)
-- `contexts/AppContext.tsx` - Global state management with sync integration
+- `lib/sync.ts` - Server sync functions (push/pull/delete) with 10s timeout
+- `lib/query-client.ts` - API URL configuration (EXPO_PUBLIC_API_URL -> EXPO_PUBLIC_DOMAIN -> almolda.com)
+- `contexts/AppContext.tsx` - Global state management with hybrid sync integration
 - `shared/schema.ts` - Drizzle ORM schema (owners, subscribers, payments, expenses, pricing)
-- `server/db.ts` - Database connection (PostgreSQL via Drizzle)
+- `server/db.ts` - Database connection (PostgreSQL via Drizzle, auto SSL for external DBs)
 - `server/routes.ts` - REST API routes (CRUD + sync endpoints)
 - `constants/colors.ts` - Theme colors
 - `server/` - Express backend
+- `scripts/deploy.sh` - One-command VPS deployment script
+- `.env.example` - Environment variable template for VPS
 
 ## API Endpoints
 - `POST /api/owners/signup` - Register new owner
@@ -75,15 +82,18 @@ A comprehensive Arabic RTL subscription management app for generator services bu
 - Password: E4toy1234
 
 ## Deployment (VPS / almolda.com)
+- **One-command deploy**: `bash scripts/deploy.sh` (pulls, installs, builds, pushes DB, starts PM2)
 - **CORS**: Server echoes origin with credentials, or uses * without credentials
-- **Frontend API URL**: Falls back to `almolda.com` when `EXPO_PUBLIC_DOMAIN` is not set
-- **Build script**: Falls back to `almolda.com` domain when no Replit env vars are present
-- **Environment Variables for VPS**:
+- **Frontend API URL**: Uses `EXPO_PUBLIC_API_URL` env var, defaults to `https://almolda.com`
+- **Database**: Auto-detects external PostgreSQL and enables SSL
+- **Environment Variables for VPS** (see `.env.example`):
   - `DATABASE_URL` (PostgreSQL connection string - required)
-  - `EXPO_PUBLIC_DOMAIN=almolda.com` (frontend API target)
+  - `EXPO_PUBLIC_API_URL=https://almolda.com` (frontend API target)
   - `PORT=5000` (Express server port, optional - defaults to 5000)
   - `NODE_ENV=production` (for production mode)
-- **No Replit-specific dependencies**: Server and frontend work without Replit env vars
+- **Server Build**: `npx esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=server_dist`
+- **Production Start**: `NODE_ENV=production node server_dist/index.js`
+- **DB Schema Push**: `npx drizzle-kit push`
 
 ## Key Dependencies
 - drizzle-orm - PostgreSQL ORM
@@ -91,3 +101,5 @@ A comprehensive Arabic RTL subscription management app for generator services bu
 - @expo-google-fonts/cairo - Arabic font
 - expo-haptics - Haptic feedback
 - expo-crypto - UUID generation
+- esbuild - Server bundling
+- pg - PostgreSQL client

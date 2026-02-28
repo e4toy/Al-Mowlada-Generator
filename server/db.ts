@@ -11,9 +11,11 @@ function getPool(): pg.Pool {
     if (!process.env.DATABASE_URL) {
       throw new Error("DATABASE_URL is not set");
     }
+    const isExternal = !process.env.DATABASE_URL.includes('localhost') && !process.env.DATABASE_URL.includes('127.0.0.1');
     pool = new Pool({
       connectionString: process.env.DATABASE_URL,
       max: 10,
+      ...(isExternal ? { ssl: { rejectUnauthorized: false } } : {}),
     });
   }
   return pool;

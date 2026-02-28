@@ -1,22 +1,18 @@
 import { fetch } from "expo/fetch";
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 
-/**
- * Gets the base URL for the Express API server (e.g., "http://localhost:3000")
- * @returns {string} The API base URL
- */
 export function getApiUrl(): string {
-  let host = process.env.EXPO_PUBLIC_DOMAIN;
-
-  if (!host) {
-    host = "almolda.com";
+  if (process.env.EXPO_PUBLIC_API_URL) {
+    const url = process.env.EXPO_PUBLIC_API_URL.replace(/\/+$/, "");
+    return url.startsWith("http") ? url : `https://${url}`;
   }
 
-  host = host.replace(/^https?:\/\//, "");
+  if (process.env.EXPO_PUBLIC_DOMAIN) {
+    const host = process.env.EXPO_PUBLIC_DOMAIN.replace(/^https?:\/\//, "");
+    return `https://${host}`;
+  }
 
-  const url = new URL(`https://${host}`);
-
-  return url.href;
+  return "https://almolda.com";
 }
 
 async function throwIfResNotOk(res: Response) {
