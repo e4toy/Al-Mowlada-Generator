@@ -6,7 +6,7 @@ async function apiCall(method: string, path: string, body?: unknown): Promise<an
   const baseUrl = getApiUrl();
   const url = new URL(path, baseUrl);
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10000);
+  const timeout = setTimeout(() => controller.abort(), 300000);
   try {
     const res = await fetch(url.toString(), {
       method,
