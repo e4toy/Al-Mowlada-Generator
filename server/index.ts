@@ -1,6 +1,9 @@
 import express from "express";
 import type { Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
+import { runMigrations } from "./migrations";
+import pg from "pg";
+const { Pool } = pg;
 import * as fs from "fs";
 import * as path from "path";
 
@@ -215,6 +218,17 @@ function setupErrorHandler(app: express.Application) {
   setupRequestLogging(app);
 
   configureExpoAndLanding(app);
+
+  if (process.env.DATABASE_URL) {
+    const isExternal = !process.env.DATABASE_URL.includes('localhost') && !process.env.DATABASE_URL.includes('127.0.0.1');
+    const migPool = new Pool({
+      connectionString: process.env.DATABASE_URL,
+      max: 2,
+      ...(isExternal ? { ssl: { rejectUnauthorized: false } } : {}),
+    });
+    await runMigrations(migPool);
+    await migPool.end();
+  }
 
   const server = await registerRoutes(app);
 

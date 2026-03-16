@@ -32,6 +32,8 @@ export default function LoginScreen() {
         router.replace('/dashboard');
       } else if (session.type === 'admin') {
         router.replace('/admin');
+      } else if (session.type === 'subscriber') {
+        router.replace('/subscriber-dashboard');
       }
       return;
     }

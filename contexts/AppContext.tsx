@@ -5,13 +5,14 @@ import NetInfo from '@react-native-community/netinfo';
 import { useAlert } from '@/components/CustomAlert';
 import {
   Storage, Owner, Subscriber, MonthlyPricing, Payment, Expense, Session,
-  UserStatus, ADMIN_EMAIL, ADMIN_PASSWORD, isOwnerExpired, getOwnerExpiryDate,
+  AppUser, UserStatus, ADMIN_EMAIL, ADMIN_PASSWORD, isOwnerExpired, getOwnerExpiryDate,
 } from '@/lib/storage';
 import {
   syncOwnerToServer, syncOwnerUpdate, syncFullData, syncDelete,
   fetchOwnersFromServer, fetchOwnerFromServer, fetchOwnerDataFromServer,
   processPendingSyncActions, loginOnServer, deleteOwnerOnServer,
 } from '@/lib/sync';
+import { apiRequest, getApiUrl } from '@/lib/query-client';
 
 interface AppContextValue {
   session: Session;
@@ -25,7 +26,9 @@ interface AppContextValue {
   payments: Payment[];
   expenses: Expense[];
   login: (email: string, password: string) => Promise<{ success: boolean; message: string; pending?: boolean; suspended?: boolean }>;
+  subscriberLogin: (email: string, password: string) => Promise<{ success: boolean; message: string; user?: AppUser }>;
   signup: (name: string, phone: string, email: string, password: string) => Promise<{ success: boolean; message: string }>;
+  subscriberSignup: (data: { name: string; phone: string; email: string; password: string; invitationCode: string }) => Promise<{ success: boolean; message: string; user?: AppUser }>;
   adminLogin: (email: string, password: string) => Promise<boolean>;
   logout: () => Promise<void>;
   addSubscriber: (data: Omit<Subscriber, 'id'>) => Promise<void>;
@@ -243,6 +246,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         } else if (savedSession.type === 'admin') {
           setSession(savedSession);
           await refreshOwnersInternal();
+        } else if (savedSession.type === 'subscriber') {
+          setSession(savedSession);
         }
       }
     } catch (e) {
@@ -404,6 +409,53 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return false;
   }, []);
 
+  const subscriberLogin = useCallback(async (email: string, password: string): Promise<{ success: boolean; message: string; user?: AppUser }> => {
+    try {
+      const baseUrl = getApiUrl();
+      const res = await fetch(`${baseUrl}/api/app-users/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), password }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        return { success: false, message: data.message || 'فشل تسجيل الدخول' };
+      }
+      const user: AppUser = data.user;
+      await Storage.saveAppUser(user);
+      const newSession: Session = { type: 'subscriber', userId: user.id };
+      await Storage.saveSession(newSession);
+      setSession(newSession);
+      return { success: true, message: '', user };
+    } catch (e: any) {
+      return { success: false, message: 'حدث خطأ في الاتصال بالسيرفر' };
+    }
+  }, []);
+
+  const subscriberSignup = useCallback(async (data: { name: string; phone: string; email: string; password: string; invitationCode: string }): Promise<{ success: boolean; message: string; user?: AppUser }> => {
+    try {
+      const id = Crypto.randomUUID();
+      const baseUrl = getApiUrl();
+      const res = await fetch(`${baseUrl}/api/app-users/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, ...data }),
+      });
+      const result = await res.json();
+      if (!res.ok) {
+        return { success: false, message: result.message || 'فشل إنشاء الحساب' };
+      }
+      const user: AppUser = result.user;
+      await Storage.saveAppUser(user);
+      const newSession: Session = { type: 'subscriber', userId: user.id };
+      await Storage.saveSession(newSession);
+      setSession(newSession);
+      return { success: true, message: '', user };
+    } catch (e: any) {
+      return { success: false, message: 'حدث خطأ في الاتصال بالسيرفر' };
+    }
+  }, []);
+
   async function refreshOwnersInternal() {
     try {
       const serverOwners = await fetchOwnersFromServer();
@@ -449,6 +501,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
 
     await Storage.saveSession(null);
+    await Storage.saveAppUser(null);
     setSession(null);
     setCurrentOwner(null);
     setSubscribers([]);
@@ -773,7 +826,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const value: AppContextValue = useMemo(() => ({
     session, loading, isOnline, isSyncing, currentOwner, owners,
     subscribers, pricing, payments, expenses,
-    login, signup, adminLogin, logout,
+    login, subscriberLogin, subscriberSignup, signup, adminLogin, logout,
     addSubscriber, updateSubscriber, deleteSubscriber,
     setPricing, recordPayment, cancelPayment,
     addExpense, deleteExpense,
@@ -784,7 +837,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }), [
     session, loading, isOnline, isSyncing, currentOwner, owners,
     subscribers, pricing, payments, expenses,
-    login, signup, adminLogin, logout,
+    login, subscriberLogin, subscriberSignup, signup, adminLogin, logout,
     addSubscriber, updateSubscriber, deleteSubscriber,
     setPricing, recordPayment, cancelPayment,
     addExpense, deleteExpense,

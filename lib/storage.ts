@@ -4,6 +4,7 @@ const KEYS = {
   OWNERS: '@almowlada_owners',
   SESSION: '@almowlada_session',
   PENDING_SYNC: '@almowlada_pending_sync',
+  APP_USER: '@almowlada_app_user',
   subscribers: (ownerId: string) => `@almowlada_subs_${ownerId}`,
   pricing: (ownerId: string) => `@almowlada_pricing_${ownerId}`,
   payments: (ownerId: string) => `@almowlada_payments_${ownerId}`,
@@ -26,6 +27,20 @@ export interface Owner {
   isActive: boolean;
   activatedAt: string | null;
   expiryDate: string | null;
+  invitationCode?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AppUser {
+  id: string;
+  name: string;
+  phone: string;
+  email: string;
+  password: string;
+  linkedOwnerId: string;
+  linkedSubscriberId: string | null;
+  ownerName?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -65,15 +80,38 @@ export interface Expense {
   updatedAt?: string;
 }
 
+export interface AppMessage {
+  id: string;
+  ownerId: string;
+  title: string;
+  body: string;
+  createdAt: string;
+}
+
+export interface PaymentMethodData {
+  id: string;
+  userId: string;
+  userType: string;
+  methodType: 'zaincash' | 'card';
+  details: string;
+  isDefault: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface SyncAction {
   id: string;
   type: 'add' | 'update' | 'delete';
-  entity: 'subscriber' | 'payment' | 'expense' | 'pricing';
+  entity: 'subscriber' | 'payment' | 'expense' | 'pricing' | 'owner';
   data: unknown;
   timestamp: string;
 }
 
-export type Session = { type: 'owner'; ownerId: string } | { type: 'admin' } | null;
+export type Session =
+  | { type: 'owner'; ownerId: string }
+  | { type: 'admin' }
+  | { type: 'subscriber'; userId: string }
+  | null;
 
 async function getJSON<T>(key: string, fallback: T): Promise<T> {
   try {
@@ -113,6 +151,16 @@ export const Storage = {
       await setJSON(KEYS.SESSION, session);
     } else {
       await AsyncStorage.removeItem(KEYS.SESSION);
+    }
+  },
+  async getAppUser(): Promise<AppUser | null> {
+    return getJSON(KEYS.APP_USER, null);
+  },
+  async saveAppUser(user: AppUser | null): Promise<void> {
+    if (user) {
+      await setJSON(KEYS.APP_USER, user);
+    } else {
+      await AsyncStorage.removeItem(KEYS.APP_USER);
     }
   },
   async getSubscribers(ownerId: string): Promise<Subscriber[]> {

@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import {
   View, Text, Pressable, StyleSheet, FlatList, Modal, TextInput,
-  Platform, Linking, ScrollView, I18nManager,
+  Platform, Linking, ScrollView, I18nManager, ActivityIndicator,
 } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -11,13 +11,19 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useApp } from '@/contexts/AppContext';
 import { useAlert } from '@/components/CustomAlert';
 import Colors from '@/constants/colors';
+import { getApiUrl } from '@/lib/query-client';
 import {
   Subscriber, Payment, Expense, getMonthKey, getMonthLabel,
   getTierColor, getTierBgColor, getTierLabel, sanitizePhone,
 } from '@/lib/storage';
 
-type ModalType = 'none' | 'addSubscriber' | 'editSubscriber' | 'setPricing' | 'statistics' | 'partialPayment' | 'addExpense' | 'expenseHistory' | 'payments';
+type ModalType = 'none' | 'addSubscriber' | 'editSubscriber' | 'setPricing' | 'statistics' | 'partialPayment' | 'addExpense' | 'expenseHistory' | 'payments' | 'broadcastMessage' | 'appUsers' | 'paymentMethods' | 'payoutHistory';
 type FilterType = 'all' | 'paid' | 'unpaid';
+
+interface AppUserRecord { id: string; name: string; phone: string; email: string; linkedSubscriberId: string | null; createdAt: string; }
+interface PaymentMethodRecord { id: string; methodType: string; details: string; isDefault: boolean; }
+interface PayoutRecord { id: string; amount: number; status: string; note: string | null; createdAt: string; }
+interface AppMsg { id: string; ownerId: string; title: string; body: string; createdAt: string; }
 
 export default function DashboardScreen() {
   const insets = useSafeAreaInsets();
@@ -57,6 +63,18 @@ export default function DashboardScreen() {
 
   const [expenseDesc, setExpenseDesc] = useState('');
   const [expenseAmount, setExpenseAmount] = useState('');
+
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [msgTitle, setMsgTitle] = useState('');
+  const [msgBody, setMsgBody] = useState('');
+  const [msgSubmitting, setMsgSubmitting] = useState(false);
+  const [messages, setMessages] = useState<AppMsg[]>([]);
+  const [appUsers, setAppUsers] = useState<AppUserRecord[]>([]);
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethodRecord[]>([]);
+  const [payouts, setPayouts] = useState<PayoutRecord[]>([]);
+  const [pmMethodType, setPmMethodType] = useState<'zaincash' | 'card' | null>(null);
+  const [pmDetails, setPmDetails] = useState('');
+  const [pmSubmitting, setPmSubmitting] = useState(false);
 
   const months = useMemo(() => {
     const list: { key: string; label: string; year: number; month: number }[] = [];
@@ -304,6 +322,122 @@ export default function DashboardScreen() {
     router.replace('/');
   }
 
+  async function openAppUsers() {
+    if (!app.currentOwner) return;
+    try {
+      const baseUrl = getApiUrl();
+      const res = await fetch(`${baseUrl}/api/owners/${app.currentOwner.id}/app-users`);
+      if (res.ok) setAppUsers(await res.json());
+    } catch {}
+    setModal('appUsers');
+    setDrawerOpen(false);
+  }
+
+  async function openBroadcastMessage() {
+    if (!app.currentOwner) return;
+    try {
+      const baseUrl = getApiUrl();
+      const res = await fetch(`${baseUrl}/api/messages/${app.currentOwner.id}`);
+      if (res.ok) setMessages(await res.json());
+    } catch {}
+    setMsgTitle('');
+    setMsgBody('');
+    setModal('broadcastMessage');
+    setDrawerOpen(false);
+  }
+
+  async function handleSendMessage() {
+    if (!app.currentOwner || !msgTitle.trim() || !msgBody.trim()) return;
+    setMsgSubmitting(true);
+    try {
+      const baseUrl = getApiUrl();
+      const res = await fetch(`${baseUrl}/api/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ownerId: app.currentOwner.id, title: msgTitle.trim(), body: msgBody.trim() }),
+      });
+      if (res.ok) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        const msgRes = await fetch(`${baseUrl}/api/messages/${app.currentOwner.id}`);
+        if (msgRes.ok) setMessages(await msgRes.json());
+        setMsgTitle('');
+        setMsgBody('');
+      }
+    } catch {}
+    setMsgSubmitting(false);
+  }
+
+  async function handleDeleteMessage(id: string) {
+    if (!app.currentOwner) return;
+    try {
+      const baseUrl = getApiUrl();
+      await fetch(`${baseUrl}/api/messages/${id}`, { method: 'DELETE' });
+      const res = await fetch(`${baseUrl}/api/messages/${app.currentOwner.id}`);
+      if (res.ok) setMessages(await res.json());
+    } catch {}
+  }
+
+  async function openPaymentMethods() {
+    if (!app.currentOwner) return;
+    try {
+      const baseUrl = getApiUrl();
+      const res = await fetch(`${baseUrl}/api/payment-methods/${app.currentOwner.id}`);
+      if (res.ok) setPaymentMethods(await res.json());
+    } catch {}
+    setPmMethodType(null);
+    setPmDetails('');
+    setModal('paymentMethods');
+    setDrawerOpen(false);
+  }
+
+  async function handleAddPaymentMethod() {
+    if (!app.currentOwner || !pmMethodType || !pmDetails.trim()) return;
+    setPmSubmitting(true);
+    try {
+      const baseUrl = getApiUrl();
+      const res = await fetch(`${baseUrl}/api/payment-methods`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: app.currentOwner.id,
+          userType: 'owner',
+          methodType: pmMethodType,
+          details: pmDetails.trim(),
+          isDefault: paymentMethods.length === 0,
+        }),
+      });
+      if (res.ok) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        const pmRes = await fetch(`${baseUrl}/api/payment-methods/${app.currentOwner.id}`);
+        if (pmRes.ok) setPaymentMethods(await pmRes.json());
+        setPmMethodType(null);
+        setPmDetails('');
+      }
+    } catch {}
+    setPmSubmitting(false);
+  }
+
+  async function handleDeletePaymentMethod(id: string) {
+    if (!app.currentOwner) return;
+    try {
+      const baseUrl = getApiUrl();
+      await fetch(`${baseUrl}/api/payment-methods/${id}`, { method: 'DELETE' });
+      const res = await fetch(`${baseUrl}/api/payment-methods/${app.currentOwner.id}`);
+      if (res.ok) setPaymentMethods(await res.json());
+    } catch {}
+  }
+
+  async function openPayoutHistory() {
+    if (!app.currentOwner) return;
+    try {
+      const baseUrl = getApiUrl();
+      const res = await fetch(`${baseUrl}/api/payouts/${app.currentOwner.id}`);
+      if (res.ok) setPayouts(await res.json());
+    } catch {}
+    setModal('payoutHistory');
+    setDrawerOpen(false);
+  }
+
   const subscriberPayments = activeSubscriber
     ? app.getSubscriberPayments(activeSubscriber.id, selectedMonth)
     : [];
@@ -413,17 +547,11 @@ export default function DashboardScreen() {
           <Text style={styles.ownerLabel}>لوحة التحكم</Text>
         </View>
         <View style={styles.topBarRight}>
-          <Pressable onPress={() => setModal('expenseHistory')} hitSlop={6} style={styles.topIconBtn}>
-            <Feather name="file-text" size={20} color={Colors.text} />
+          <Pressable onPress={openBroadcastMessage} hitSlop={6} style={styles.topIconBtn}>
+            <Feather name="message-square" size={20} color={Colors.text} />
           </Pressable>
-          <Pressable onPress={() => setModal('statistics')} hitSlop={6} style={styles.topIconBtn}>
-            <Feather name="bar-chart-2" size={20} color={Colors.text} />
-          </Pressable>
-          <Pressable onPress={() => setModal('setPricing')} hitSlop={6} style={styles.topIconBtn}>
-            <Feather name="dollar-sign" size={20} color={Colors.text} />
-          </Pressable>
-          <Pressable onPress={handleLogout} hitSlop={6} style={styles.topIconBtn}>
-            <Feather name="log-out" size={20} color={Colors.error} />
+          <Pressable onPress={() => setDrawerOpen(true)} hitSlop={6} style={styles.topIconBtn}>
+            <Feather name="menu" size={22} color={Colors.text} />
           </Pressable>
         </View>
       </View>
@@ -788,9 +916,252 @@ export default function DashboardScreen() {
           </View>
         </View>
       </Modal>
+
+      <Modal visible={drawerOpen} transparent animationType="slide" onRequestClose={() => setDrawerOpen(false)}>
+        <Pressable style={styles.drawerOverlay} onPress={() => setDrawerOpen(false)}>
+          <Pressable style={[styles.drawer, { paddingTop: topPad + 8 }]} onPress={() => {}}>
+            <View style={styles.drawerHeader}>
+              <View>
+                <Text style={styles.drawerOwnerName}>{app.currentOwner?.name}</Text>
+                <Text style={styles.drawerOwnerSub}>صاحب المولدة</Text>
+              </View>
+              <Pressable onPress={() => setDrawerOpen(false)} hitSlop={8}>
+                <Feather name="x" size={22} color={Colors.text} />
+              </Pressable>
+            </View>
+            {app.currentOwner?.invitationCode ? (
+              <View style={styles.inviteCodeBox}>
+                <Feather name="key" size={16} color={Colors.primary} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.inviteCodeLabel}>كود الدعوة للتطبيق</Text>
+                  <Text style={styles.inviteCodeValue}>{app.currentOwner.invitationCode}</Text>
+                </View>
+              </View>
+            ) : null}
+            <View style={styles.drawerDivider} />
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <DrawerItem icon="bar-chart-2" label="الإحصائيات" onPress={() => { setModal('statistics'); setDrawerOpen(false); }} />
+              <DrawerItem icon="dollar-sign" label="الأسعار" onPress={() => { openPricingModal(); setDrawerOpen(false); }} />
+              <DrawerItem icon="file-text" label="سجل المصروفات" onPress={() => { setModal('expenseHistory'); setDrawerOpen(false); }} />
+              <View style={styles.drawerDivider} />
+              <DrawerItem icon="users" label="مشتركو التطبيق" onPress={openAppUsers} />
+              <DrawerItem icon="message-square" label="نشر رسالة" onPress={openBroadcastMessage} />
+              <View style={styles.drawerDivider} />
+              <DrawerItem icon="credit-card" label="وسائل الاستلام" onPress={openPaymentMethods} />
+              <DrawerItem icon="trending-up" label="سجل التحويلات" onPress={openPayoutHistory} />
+              <View style={styles.drawerDivider} />
+              <DrawerItem icon="log-out" label="تسجيل الخروج" onPress={handleLogout} color={Colors.error} />
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal visible={modal === 'broadcastMessage'} animationType="fade" transparent onRequestClose={() => setModal('none')}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>نشر رسالة للمشتركين</Text>
+              <Pressable onPress={() => setModal('none')}><Feather name="x" size={22} color={Colors.text} /></Pressable>
+            </View>
+            <ScrollView contentContainerStyle={styles.modalBody}>
+              <Text style={styles.modalLabel}>عنوان الرسالة</Text>
+              <TextInput style={styles.modalInput} value={msgTitle} onChangeText={setMsgTitle} placeholder="مثال: تغيير الأسعار" placeholderTextColor={Colors.textMuted} textAlign={I18nManager.isRTL ? 'right' : 'left'} />
+              <Text style={styles.modalLabel}>نص الرسالة</Text>
+              <TextInput
+                style={[styles.modalInput, { height: 100, textAlignVertical: 'top', paddingTop: 12 }]}
+                value={msgBody} onChangeText={setMsgBody}
+                placeholder="اكتب رسالتك هنا..." placeholderTextColor={Colors.textMuted}
+                multiline textAlign={I18nManager.isRTL ? 'right' : 'left'}
+              />
+              <Pressable
+                style={({ pressed }) => [styles.modalBtn, pressed && { opacity: 0.85 }]}
+                onPress={handleSendMessage}
+                disabled={msgSubmitting}
+              >
+                {msgSubmitting
+                  ? <ActivityIndicator color="#fff" size="small" />
+                  : <Text style={styles.modalBtnText}>إرسال الرسالة</Text>}
+              </Pressable>
+
+              {messages.length > 0 && (
+                <>
+                  <Text style={[styles.modalLabel, { marginTop: 20 }]}>الرسائل المرسلة</Text>
+                  {messages.map((msg) => (
+                    <View key={msg.id} style={styles.msgListItem}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.msgListTitle}>{msg.title}</Text>
+                        <Text style={styles.msgListBody} numberOfLines={2}>{msg.body}</Text>
+                        <Text style={styles.msgListDate}>{new Date(msg.createdAt).toLocaleDateString('ar-IQ')}</Text>
+                      </View>
+                      <Pressable onPress={() => handleDeleteMessage(msg.id)} hitSlop={8}>
+                        <Feather name="trash-2" size={16} color={Colors.error} />
+                      </Pressable>
+                    </View>
+                  ))}
+                </>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={modal === 'appUsers'} animationType="fade" transparent onRequestClose={() => setModal('none')}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>مشتركو التطبيق ({appUsers.length})</Text>
+              <Pressable onPress={() => setModal('none')}><Feather name="x" size={22} color={Colors.text} /></Pressable>
+            </View>
+            <FlatList
+              data={appUsers}
+              keyExtractor={(item) => item.id}
+              contentContainerStyle={{ padding: 16, gap: 10 }}
+              scrollEnabled={!!appUsers.length}
+              ListEmptyComponent={
+                <View style={styles.emptyState}>
+                  <Feather name="users" size={36} color={Colors.textMuted} />
+                  <Text style={styles.emptyText}>لم ينضم أي مشترك للتطبيق بعد</Text>
+                  <Text style={[styles.emptySubText, { textAlign: 'center' }]}>
+                    شارك كود الدعوة{app.currentOwner?.invitationCode ? ` (${app.currentOwner.invitationCode})` : ''} مع مشتركيك
+                  </Text>
+                </View>
+              }
+              renderItem={({ item }) => (
+                <View style={styles.appUserItem}>
+                  <View style={styles.appUserAvatar}>
+                    <Feather name="user" size={18} color={Colors.primary} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.appUserName}>{item.name}</Text>
+                    <Text style={styles.appUserPhone}>{item.phone}</Text>
+                  </View>
+                  <View style={[styles.linkStatusBadge, { backgroundColor: item.linkedSubscriberId ? Colors.successLight : Colors.warningLight }]}>
+                    <Text style={[styles.linkStatusText, { color: item.linkedSubscriberId ? Colors.success : Colors.warning }]}>
+                      {item.linkedSubscriberId ? 'مرتبط' : 'غير مرتبط'}
+                    </Text>
+                  </View>
+                </View>
+              )}
+            />
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={modal === 'paymentMethods'} animationType="fade" transparent onRequestClose={() => setModal('none')}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>وسائل الاستلام</Text>
+              <Pressable onPress={() => setModal('none')}><Feather name="x" size={22} color={Colors.text} /></Pressable>
+            </View>
+            <ScrollView contentContainerStyle={styles.modalBody}>
+              {paymentMethods.map((pm) => (
+                <View key={pm.id} style={styles.pmItem}>
+                  <Feather name={pm.methodType === 'zaincash' ? 'smartphone' : 'credit-card'} size={18} color={Colors.text} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.pmType}>{pm.methodType === 'zaincash' ? 'زين كاش' : 'بطاقة'}</Text>
+                    <Text style={styles.pmDetails}>{pm.details}</Text>
+                  </View>
+                  {pm.isDefault && (
+                    <View style={styles.defaultBadge}><Text style={styles.defaultBadgeText}>افتراضي</Text></View>
+                  )}
+                  <Pressable onPress={() => handleDeletePaymentMethod(pm.id)} hitSlop={8}>
+                    <Feather name="trash-2" size={16} color={Colors.error} />
+                  </Pressable>
+                </View>
+              ))}
+              <Text style={[styles.modalLabel, { marginTop: 16 }]}>إضافة وسيلة استلام</Text>
+              <View style={styles.tierPicker}>
+                {([['zaincash', 'زين كاش'], ['card', 'بطاقة']] as const).map(([t, label]) => (
+                  <Pressable
+                    key={t}
+                    style={[styles.tierOption, pmMethodType === t && { backgroundColor: Colors.primaryFaded, borderColor: Colors.primary }]}
+                    onPress={() => setPmMethodType(t)}
+                  >
+                    <Text style={[styles.tierOptionText, { color: Colors.primary }]}>{label}</Text>
+                  </Pressable>
+                ))}
+              </View>
+              {pmMethodType && (
+                <>
+                  <TextInput
+                    style={styles.modalInput}
+                    value={pmDetails}
+                    onChangeText={setPmDetails}
+                    placeholder={pmMethodType === 'zaincash' ? '07XXXXXXXXX' : 'رقم البطاقة'}
+                    placeholderTextColor={Colors.textMuted}
+                    keyboardType={pmMethodType === 'zaincash' ? 'phone-pad' : 'numeric'}
+                    textAlign={I18nManager.isRTL ? 'right' : 'left'}
+                  />
+                  <Pressable
+                    style={({ pressed }) => [styles.modalBtn, pressed && { opacity: 0.85 }]}
+                    onPress={handleAddPaymentMethod}
+                    disabled={pmSubmitting}
+                  >
+                    {pmSubmitting
+                      ? <ActivityIndicator color="#fff" size="small" />
+                      : <Text style={styles.modalBtnText}>إضافة</Text>}
+                  </Pressable>
+                </>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={modal === 'payoutHistory'} animationType="fade" transparent onRequestClose={() => setModal('none')}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>سجل التحويلات</Text>
+              <Pressable onPress={() => setModal('none')}><Feather name="x" size={22} color={Colors.text} /></Pressable>
+            </View>
+            <FlatList
+              data={payouts}
+              keyExtractor={(item) => item.id}
+              contentContainerStyle={{ padding: 16, gap: 10 }}
+              scrollEnabled={!!payouts.length}
+              ListEmptyComponent={
+                <View style={styles.emptyState}>
+                  <Feather name="trending-up" size={36} color={Colors.textMuted} />
+                  <Text style={styles.emptyText}>لا توجد تحويلات مسجلة بعد</Text>
+                </View>
+              }
+              renderItem={({ item }) => (
+                <View style={styles.payoutItem}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.payoutAmount}>{Number(item.amount).toLocaleString()} د.ع</Text>
+                    {item.note ? <Text style={styles.payoutNote}>{item.note}</Text> : null}
+                    <Text style={styles.payoutDate}>{new Date(item.createdAt).toLocaleDateString('ar-IQ')}</Text>
+                  </View>
+                  <View style={[styles.payoutStatusBadge, { backgroundColor: item.status === 'completed' ? Colors.successLight : Colors.warningLight }]}>
+                    <Text style={[styles.payoutStatusText, { color: item.status === 'completed' ? Colors.success : Colors.warning }]}>
+                      {item.status === 'completed' ? 'مكتمل' : 'معلق'}
+                    </Text>
+                  </View>
+                </View>
+              )}
+            />
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
+
+function DrawerItem({ icon, label, onPress, color }: { icon: string; label: string; onPress: () => void; color?: string }) {
+  return (
+    <Pressable style={({ pressed }) => [drawerItemStyles.item, pressed && { opacity: 0.7 }]} onPress={onPress}>
+      <Feather name={icon as any} size={20} color={color || Colors.text} />
+      <Text style={[drawerItemStyles.label, color ? { color } : {}]}>{label}</Text>
+      <Feather name="chevron-left" size={16} color={color || Colors.textMuted} style={{ marginLeft: 'auto' }} />
+    </Pressable>
+  );
+}
+const drawerItemStyles = StyleSheet.create({
+  item: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 13, paddingHorizontal: 4 },
+  label: { fontSize: 15, fontFamily: 'Cairo_600SemiBold', color: Colors.text },
+});
 
 function StatCard({ icon, label, value, color }: { icon: string; label: string; value: string; color: string }) {
   return (
@@ -1410,5 +1781,205 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: 'Cairo_700Bold',
     color: '#fff',
+  },
+  drawerOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+  },
+  drawer: {
+    width: '80%',
+    height: '100%',
+    backgroundColor: Colors.surface,
+    paddingHorizontal: 20,
+    paddingBottom: 24,
+    borderLeftWidth: 1,
+    borderLeftColor: Colors.border,
+  },
+  drawerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  drawerOwnerName: {
+    fontSize: 17,
+    fontFamily: 'Cairo_700Bold',
+    color: Colors.text,
+  },
+  drawerOwnerSub: {
+    fontSize: 13,
+    fontFamily: 'Cairo_400Regular',
+    color: Colors.textMuted,
+    marginTop: 2,
+  },
+  inviteCodeBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: Colors.primaryFaded,
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 14,
+  },
+  inviteCodeLabel: {
+    fontSize: 11,
+    fontFamily: 'Cairo_400Regular',
+    color: Colors.primary,
+  },
+  inviteCodeValue: {
+    fontSize: 20,
+    fontFamily: 'Cairo_700Bold',
+    color: Colors.primary,
+    letterSpacing: 2,
+  },
+  drawerDivider: {
+    height: 1,
+    backgroundColor: Colors.border,
+    marginVertical: 8,
+  },
+  msgListItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    backgroundColor: Colors.background,
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  msgListTitle: {
+    fontSize: 14,
+    fontFamily: 'Cairo_700Bold',
+    color: Colors.text,
+    textAlign: 'right',
+  },
+  msgListBody: {
+    fontSize: 12,
+    fontFamily: 'Cairo_400Regular',
+    color: Colors.textSecondary,
+    textAlign: 'right',
+    marginTop: 2,
+  },
+  msgListDate: {
+    fontSize: 11,
+    fontFamily: 'Cairo_400Regular',
+    color: Colors.textMuted,
+    marginTop: 4,
+    textAlign: 'right',
+  },
+  appUserItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: Colors.background,
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  appUserAvatar: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: Colors.primaryFaded,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  appUserName: {
+    fontSize: 15,
+    fontFamily: 'Cairo_600SemiBold',
+    color: Colors.text,
+    textAlign: 'right',
+  },
+  appUserPhone: {
+    fontSize: 12,
+    fontFamily: 'Cairo_400Regular',
+    color: Colors.textMuted,
+    textAlign: 'right',
+  },
+  linkStatusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  linkStatusText: {
+    fontSize: 11,
+    fontFamily: 'Cairo_700Bold',
+  },
+  pmItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: Colors.background,
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  pmType: {
+    fontSize: 14,
+    fontFamily: 'Cairo_600SemiBold',
+    color: Colors.text,
+    textAlign: 'right',
+  },
+  pmDetails: {
+    fontSize: 12,
+    fontFamily: 'Cairo_400Regular',
+    color: Colors.textMuted,
+    textAlign: 'right',
+  },
+  defaultBadge: {
+    backgroundColor: Colors.primaryFaded,
+    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  defaultBadgeText: {
+    fontSize: 10,
+    fontFamily: 'Cairo_600SemiBold',
+    color: Colors.primary,
+  },
+  payoutItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: Colors.background,
+    borderRadius: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  payoutAmount: {
+    fontSize: 16,
+    fontFamily: 'Cairo_700Bold',
+    color: Colors.text,
+    textAlign: 'right',
+  },
+  payoutNote: {
+    fontSize: 12,
+    fontFamily: 'Cairo_400Regular',
+    color: Colors.textSecondary,
+    textAlign: 'right',
+    marginTop: 2,
+  },
+  payoutDate: {
+    fontSize: 11,
+    fontFamily: 'Cairo_400Regular',
+    color: Colors.textMuted,
+    marginTop: 4,
+    textAlign: 'right',
+  },
+  payoutStatusBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 10,
+  },
+  payoutStatusText: {
+    fontSize: 12,
+    fontFamily: 'Cairo_700Bold',
   },
 });

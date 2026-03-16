@@ -29,6 +29,8 @@ function RootLayoutNav() {
       <Stack.Screen name="suspended" />
       <Stack.Screen name="dashboard" />
       <Stack.Screen name="admin" />
+      <Stack.Screen name="subscriber-dashboard" />
+      <Stack.Screen name="subscriber-onboarding" />
     </Stack>
   );
 }
