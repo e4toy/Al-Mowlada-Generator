@@ -577,7 +577,7 @@ export default function DashboardScreen() {
               <Text style={styles.modalLabel}>رقم الهاتف</Text>
               <TextInput style={styles.modalInput} value={editSubPhone} onChangeText={setEditSubPhone} placeholder="07XXXXXXXXX" placeholderTextColor={Colors.textMuted} keyboardType="phone-pad" textAlign={I18nManager.isRTL ? 'right' : 'left'} />
               <Text style={styles.modalLabel}>عدد الأمبيرات</Text>
-              <TextInput style={styles.modalInput} value={editSubAmperes} onChangeText={setEditSubAmperes} placeholder="مثال: 5" placeholderTextColor={Colors.textMuted} keyboardType="numeric" textAlign={I18nManager.isRTL ? 'right' : 'left'} />
+              <TextInput style={styles.modalInput} value={editSubAmperes} onChangeText={setEditSubAmperes} placeholder="مثال: 3" placeholderTextColor={Colors.textMuted} keyboardType="numeric" textAlign={I18nManager.isRTL ? 'right' : 'left'} />
               <Text style={styles.modalLabel}>نوع الاشتراك</Text>
               <View style={styles.tierPicker}>
                 {(['gold', 'silver', 'bronze'] as const).map((t) => (
