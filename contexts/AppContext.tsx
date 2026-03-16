@@ -367,6 +367,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       };
       allOwners.push(newOwner);
       await Storage.saveOwners(allOwners);
+      setOwners(allOwners);
 
       try {
         const synced = await syncOwnerToServer(newOwner);

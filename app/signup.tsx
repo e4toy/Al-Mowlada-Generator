@@ -7,15 +7,16 @@ import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import NetInfo from '@react-native-community/netinfo';
 import Animated, { FadeInDown, FadeIn } from 'react-native-reanimated';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
 import Colors from '@/constants/colors';
+import { useApp } from '@/contexts/AppContext';
 
 type Step = 'role' | 'ownerForm';
 
 export default function SignupScreen() {
   const insets = useSafeAreaInsets();
+  const { signup } = useApp();
   const [step, setStep] = useState<Step>('role');
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
@@ -43,37 +44,16 @@ export default function SignupScreen() {
     setSubmitting(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
-    try {
-      const netState = await NetInfo.fetch();
-      if (!netState.isConnected) {
-        throw new Error('لا يوجد اتصال بالإنترنت. يجب أن تكون متصلاً لإرسال طلبك للمدير.');
-      }
+    const result = await signup(name.trim(), phone.trim(), email.trim(), password);
 
-      const response = await fetch('https://almolda.com/api/signup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: name.trim(),
-          phone: phone.trim(),
-          email: email.trim(),
-          password: password,
-        }),
-      });
-
-      const result = await response.json();
-
-      if (response.ok) {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        setSuccess('تم إرسال طلبك للمدير بنجاح، بانتظار الموافقة.');
-        setName(''); setPhone(''); setEmail(''); setPassword('');
-      } else {
-        throw new Error(result.message || 'فشل التسجيل في السيرفر');
-      }
-    } catch (err: any) {
+    setSubmitting(false);
+    if (result.success) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setSuccess('تم إرسال طلبك للمدير بنجاح، بانتظار الموافقة.');
+      setName(''); setPhone(''); setEmail(''); setPassword('');
+    } else {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      setError(err.message || 'حدث خطأ في الاتصال بالسيرفر');
-    } finally {
-      setSubmitting(false);
+      setError(result.message);
     }
   }
 
